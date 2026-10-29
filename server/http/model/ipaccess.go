@@ -48,6 +48,14 @@ type V2IPAccessRuleResp struct {
 	Source string `json:"source,omitempty"`
 }
 
+// V2IPAccessCurrentIPResp tells the dashboard which address its own requests
+// come from, so the operator can allow it with one click.
+type V2IPAccessCurrentIPResp struct {
+	IP string `json:"ip"`
+	// Loopback is true when the dashboard is opened on the frps host itself.
+	Loopback bool `json:"loopback"`
+}
+
 // V2IPAccessSelfAllowResp is returned to the caller of the self-allow api, it
 // only describes what happened to its own address.
 type V2IPAccessSelfAllowResp struct {

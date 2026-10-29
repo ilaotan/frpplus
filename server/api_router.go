@@ -72,6 +72,9 @@ func (svr *Service) registerRouteHandlers(helper *httppkg.RouterRegisterHelper) 
 	// Self allow lets the dashboard account add its own client IP to the global
 	// allow list, GET is there so that a phone bookmark can be used as a knock.
 	subRouter.HandleFunc("/api/v2/ip-access/self-allow", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessSelfAllow)).Methods("GET", "POST")
+	// One click allow of the address the dashboard is opened from.
+	subRouter.HandleFunc("/api/v2/ip-access/current-ip", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessCurrentIP)).Methods("GET")
+	subRouter.HandleFunc("/api/v2/ip-access/allow-current-ip", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessAllowCurrentIP)).Methods("POST")
 
 	// view
 	subRouter.Handle("/favicon.ico", http.FileServer(helper.AssetsFS)).Methods("GET")

@@ -61,6 +61,20 @@ export interface IPAccessPruneResponse {
   total: number
 }
 
+export interface IPAccessCurrentIP {
+  ip: string
+  // true when the dashboard is opened on the frps host itself
+  loopback: boolean
+}
+
+export interface IPAccessAllowResult {
+  ip: string
+  proxyName: string
+  action: IPAccessAction
+  ruleId: number
+  expiresAt: number
+}
+
 export interface IPAccessClearedResponse {
   cleared: number
 }

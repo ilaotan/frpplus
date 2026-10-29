@@ -110,9 +110,33 @@
         <template #header>
           <div class="section-header">
             <span class="section-title">Rules</span>
-            <span class="section-meta">
-              The most specific rule wins, deny wins on equal prefix length.
-            </span>
+            <div class="section-actions">
+              <span class="section-meta">
+                The most specific rule wins, deny wins on equal prefix length.
+              </span>
+              <span v-if="currentIP" class="section-meta mono">
+                Your IP: {{ currentIP }}{{ currentIPLoopback ? ' (local)' : '' }}
+              </span>
+              <el-dropdown
+                trigger="click"
+                :disabled="!settings?.enabled || allowingSelf"
+                @command="allowMyIP"
+              >
+                <el-button size="small" :loading="allowingSelf">
+                  Allow my IP
+                </el-button>
+                <template #dropdown>
+                  <el-dropdown-menu>
+                    <el-dropdown-item :command="1">For 1 hour</el-dropdown-item>
+                    <el-dropdown-item :command="24">For 24 hours</el-dropdown-item>
+                    <el-dropdown-item :command="168">For 7 days</el-dropdown-item>
+                    <el-dropdown-item :command="0" divided>
+                      Permanently
+                    </el-dropdown-item>
+                  </el-dropdown-menu>
+                </template>
+              </el-dropdown>
+            </div>
           </div>
         </template>
 
@@ -343,9 +367,11 @@ import { computed, onMounted, reactive, ref } from 'vue'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import ActionButton from '@shared/components/ActionButton.vue'
 import {
+  allowIPAccessCurrentIP,
   createIPAccessRule,
   deleteIPAccessRecords,
   deleteIPAccessRule,
+  getIPAccessCurrentIP,
   getIPAccessRecords,
   getIPAccessRules,
   getIPAccessSettings,
@@ -405,6 +431,10 @@ const recordFilter = reactive<{
   result: 'all',
 })
 const selectedRecordIds = ref<number[]>([])
+
+const currentIP = ref('')
+const currentIPLoopback = ref(false)
+const allowingSelf = ref(false)
 
 const modeHint = computed(() => {
   switch (globalMode.value) {
@@ -475,11 +505,53 @@ const loadRecords = async () => {
   }
 }
 
+const loadCurrentIP = async () => {
+  try {
+    const resp = await getIPAccessCurrentIP()
+    currentIP.value = resp.ip
+    currentIPLoopback.value = resp.loopback
+  } catch {
+    currentIP.value = ''
+  }
+}
+
+// Allow the address this browser is talking from. 0 means the rule never
+// expires, which is what "long lived" means here.
+const allowMyIP = async (command: string | number | object) => {
+  if (!ensureEnabled()) return
+  const hours = Number(command)
+  if (!Number.isFinite(hours) || hours < 0) return
+  allowingSelf.value = true
+  try {
+    const resp = await allowIPAccessCurrentIP(hours)
+    await Promise.all([loadRules(), loadSettings()])
+    ElMessage.success(
+      resp.expiresAt
+        ? `${resp.ip} allowed for ${describeHours(hours)}`
+        : `${resp.ip} allowed permanently`,
+    )
+  } catch (err) {
+    ElMessage.error(err instanceof Error ? err.message : 'Failed to allow this ip')
+  } finally {
+    allowingSelf.value = false
+  }
+}
+
+const describeHours = (hours: number) => {
+  if (hours % 24 === 0 && hours >= 24) return `${hours / 24} day(s)`
+  return `${hours} hour(s)`
+}
+
 const refreshAll = async () => {
   loading.value = true
   try {
     await loadSettings()
-    await Promise.all([loadProxyNames(), loadRules(), loadRecords()])
+    await Promise.all([
+      loadProxyNames(),
+      loadRules(),
+      loadRecords(),
+      loadCurrentIP(),
+    ])
   } catch (err) {
     ElMessage.error(err instanceof Error ? err.message : 'Failed to load data')
   } finally {
@@ -697,6 +769,13 @@ onMounted(() => {
 .section-meta {
   font-size: $font-size-sm;
   color: $color-text-muted;
+}
+
+.section-actions {
+  display: flex;
+  align-items: center;
+  gap: $spacing-md;
+  flex-wrap: wrap;
 }
 
 .sub-title {

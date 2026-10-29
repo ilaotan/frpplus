@@ -2,7 +2,9 @@ import { buildQueryString, http } from './http'
 import type { V2Page } from './http'
 import type {
   IPAccessAction,
+  IPAccessAllowResult,
   IPAccessClearedResponse,
+  IPAccessCurrentIP,
   IPAccessMode,
   IPAccessPruneResponse,
   IPAccessRecord,
@@ -73,4 +75,13 @@ export const deleteIPAccessRecords = (ids: number[]) => {
 
 export const pruneIPAccessRecords = () => {
   return http.postV2<IPAccessPruneResponse>(`${base}/prune`)
+}
+
+export const getIPAccessCurrentIP = () => {
+  return http.getV2<IPAccessCurrentIP>(`${base}/current-ip`)
+}
+
+// hours 0 keeps the rule permanent.
+export const allowIPAccessCurrentIP = (hours: number) => {
+  return http.postV2<IPAccessAllowResult>(`${base}/allow-current-ip`, { hours })
 }

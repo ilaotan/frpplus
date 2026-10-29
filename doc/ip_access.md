@@ -114,6 +114,8 @@ selfAllowHours = 24
 | POST | `/api/v2/ip-access/records/delete` | `{"ids":[1,2]}` |
 | POST | `/api/v2/ip-access/prune` | 立即清理过期规则和记录 |
 | GET/POST | `/api/v2/ip-access/self-allow` | 自助加白，见下一节 |
+| GET | `/api/v2/ip-access/current-ip` | 回显"页面请求来自哪个 IP"，`{"ip":"1.2.3.4","loopback":false}` |
+| POST | `/api/v2/ip-access/allow-current-ip` | 把当前访问者的 IP 加进全局 allow，`{"hours":0}`，`0` 表示永久 |
 
 `proxyName` 为 `*` 表示全局规则。
 
@@ -160,7 +162,15 @@ IP 变了之后最多一个间隔即可恢复，且不会产生无意义的请�
 
 - **Mode**：切换全局模式，查看/设置单个代理的覆盖；
 - **Rules**：增删规则，`Expires` 列显示有效期（`permanent` 表示永久），`api` 标记表示自助加白产生；
+  右上角 **Allow my IP** 按钮可一键把"页面上看到的本机 IP"加进白名单，下拉里选有效期：
+  `1 hour` / `24 hours` / `7 days` / `Permanently`；
 - **Access records**：按代理/IP/结果筛选，可对某一行直接 **Allow / Deny** 生成规则，支持批量删除与立即 Prune。
+
+`Allow my IP` 是**管理动作**（走 Dashboard 账号），与自助加白接口的区别：
+
+- 不依赖 `enableSelfAllow`；
+- 允许回环地址——你在 frps 本机打开页面时，加的就是 `127.0.0.1`，这是合理需求；
+- 页面头部会显示 `Your IP: x.x.x.x`，本机访问时标 `(local)`，点击前就能确认加的是哪个地址。
 
 页面不自动刷新，点右上角 **Refresh** 获取最新记录。
 

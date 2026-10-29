@@ -48,6 +48,12 @@ type ipAccessRecordsDeleteReq struct {
 	IDs []uint64 `json:"ids"`
 }
 
+// ipAccessAllowCurrentIPReq asks to allow the address of the caller. Hours 0
+// means the rule never expires.
+type ipAccessAllowCurrentIPReq struct {
+	Hours int64 `json:"hours"`
+}
+
 func (c *Controller) ipAccessController() (*ipaccess.Controller, error) {
 	if c.ipAccessCtl == nil {
 		return nil, httppkg.NewError(http.StatusBadRequest,
@@ -280,6 +286,68 @@ func (c *Controller) APIV2IPAccessSelfAllow(ctx *httppkg.Context) (any, error) {
 	}
 	log.Infof("ip access control: self allow for [%s], %d hour(s), expires at [%s]",
 		ip, hours, formatOptionalUnix(rule.ExpiresAt))
+	return model.V2IPAccessSelfAllowResp{
+		IP:        rule.IP,
+		ProxyName: rule.ProxyName,
+		Action:    rule.Action,
+		RuleID:    rule.ID,
+		ExpiresAt: rule.ExpiresAt,
+	}, nil
+}
+
+// /api/v2/ip-access/current-ip
+//
+// Reports the address the dashboard requests come from, so the page can show it
+// and offer to allow it in one click.
+func (c *Controller) APIV2IPAccessCurrentIP(ctx *httppkg.Context) (any, error) {
+	if _, err := c.ipAccessController(); err != nil {
+		return nil, err
+	}
+	ip, err := ipaccess.ClientIPFromRemoteAddr(ctx.Req.RemoteAddr)
+	if err != nil {
+		return nil, httppkg.NewError(http.StatusBadRequest, err.Error())
+	}
+	return model.V2IPAccessCurrentIPResp{
+		IP:       ip,
+		Loopback: ipaccess.IsLoopbackOrUnspecified(ip),
+	}, nil
+}
+
+// /api/v2/ip-access/allow-current-ip
+//
+// Allows the address of the caller in the global allow list. Unlike self-allow
+// it is a normal dashboard action: it does not depend on enableSelfAllow and it
+// also accepts a loopback address, because the operator may well be sitting on
+// the frps host itself.
+//
+// The address is still taken from the TCP connection, never from the body.
+func (c *Controller) APIV2IPAccessAllowCurrentIP(ctx *httppkg.Context) (any, error) {
+	ctl, err := c.ipAccessController()
+	if err != nil {
+		return nil, err
+	}
+	ip, err := ipaccess.ClientIPFromRemoteAddr(ctx.Req.RemoteAddr)
+	if err != nil {
+		return nil, httppkg.NewError(http.StatusBadRequest, err.Error())
+	}
+
+	req := ipAccessAllowCurrentIPReq{Hours: c.serverCfg.IPAccessControl.SelfAllowHours}
+	if err := ctx.BindJSON(&req); err != nil {
+		return nil, httppkg.NewError(http.StatusBadRequest, "invalid request body: "+err.Error())
+	}
+	if req.Hours < 0 {
+		return nil, httppkg.NewError(http.StatusBadRequest, "hours must not be negative, 0 means permanent")
+	}
+	if req.Hours > selfAllowMaxHours {
+		req.Hours = selfAllowMaxHours
+	}
+
+	rule, err := ctl.AllowIP(ip, req.Hours)
+	if err != nil {
+		return nil, httppkg.NewError(http.StatusBadRequest, err.Error())
+	}
+	log.Infof("ip access control: allow current ip [%s] from the dashboard, expires at [%s]",
+		ip, formatOptionalUnix(rule.ExpiresAt))
 	return model.V2IPAccessSelfAllowResp{
 		IP:        rule.IP,
 		ProxyName: rule.ProxyName,
