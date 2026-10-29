@@ -1,5 +1,13 @@
 # frp
 
+> **本仓库的本地增强：TCP 代理的客户端 IP 准入控制（IP Access）**
+> 在 frps 侧按真实客户端 IP 放行/拦截 tcp 代理连接，支持允许名单/拒绝名单、按代理覆盖、
+> Dashboard 可视化管理，以及让动态 IP 客户端"敲门"自助加白的接口。
+> 使用说明见 **[doc/ip_access.md](doc/ip_access.md)**。
+>
+> Local addition in this fork: server side allow/deny control over the real client IP of
+> tcp proxies. Usage: **[doc/ip_access.md](doc/ip_access.md)**.
+
 [![Build Status](https://circleci.com/gh/fatedier/frp.svg?style=shield)](https://circleci.com/gh/fatedier/frp)
 [![GitHub release](https://img.shields.io/github/tag/fatedier/frp.svg?label=release)](https://github.com/fatedier/frp/releases)
 [![GitHub Releases Stats](https://img.shields.io/github/downloads/fatedier/frp/total.svg?logo=github)](https://somsubhra.github.io/github-release-stats/?username=fatedier&repository=frp)

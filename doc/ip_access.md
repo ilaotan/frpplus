@@ -1,0 +1,203 @@
+# TCP 代理的客户端 IP 准入控制（IP Access）
+
+> 本特性是 frp 的本地增强，只作用于 **tcp 类型**的代理。
+
+## 1. 解决什么问题
+
+tcp 代理的链路是这样的：
+
+```
+客户端 ──> frps:remotePort ──[work conn]──> frpc ──> 内网服务 127.0.0.1:localPort
+```
+
+内网服务看到的连接来源永远是 `127.0.0.1`（frpc 本机），真实客户端 IP 只在 **frps** 侧存在。
+如果要做"只允许某些 IP 访问这个端口"，只能在 frps 上做判断。
+
+frp 自带的 `proxy_protocol`（PROXY protocol）也能传递真实 IP，但它要求内网服务自己解析
+PROXY 协议头——很多现成服务（数据库、老业务）不支持。本特性不改变隧道内数据，直接在服务端
+按 IP 放行或拦截，对 frpc 和内网服务都是透明的。
+
+## 2. 工作原理
+
+拦截点在 `server/proxy/proxy.go` 的 `handleUserTCPConnection`：
+
+```
+客户端连接进来
+   │
+   ├─ 取 userConn.RemoteAddr()  → 真实客户端 IP
+   ├─ IP Access 判定：模式 + 规则（+ 记录这次访问）
+   │     └─ 拒绝 → 直接关闭连接，不分配 work conn
+   ├─ server plugin 钩子（原有逻辑）
+   └─ 分配 work conn → 转发
+```
+
+要点：
+
+- 判定发生在**分配 work conn 之前**，被拦的连接不消耗 frpc 侧资源。
+- 每个 TCP 连接都会写入一条访问记录（同一 代理+IP 只累加，不新增行）。
+- 判定只针对 `tcp` 类型；udp / http / https / tcpmux / stcp 等不受影响。
+
+## 3. 快速开始
+
+```toml
+# frps.toml
+bindPort = 7000
+auth.token = "your-token"
+
+webServer.addr = "0.0.0.0"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "your-password"
+
+[ipAccessControl]
+enable = true
+storePath = "/var/lib/frp/ipaccess.json"   # 建议绝对路径
+defaultMode = "allowlist"                  # 先收紧，再按需放行
+retentionHours = 168
+maxRecords = 50000
+enableSelfAllow = false
+selfAllowHours = 24
+```
+
+重启 frps 后打开 Dashboard → 左侧 **IP Access**。
+
+> `defaultMode = "allowlist"` 且一条规则都没有时，**该端口的所有连接都会被拒**。
+> 稳妥的做法是先设 `off`，在记录里观察一段时间真实来源，再切到黑白名单。
+
+## 4. 模式与匹配规则
+
+三种模式：
+
+| 模式 | 行为 |
+|---|---|
+| `off` | 不拦截，只记录（默认） |
+| `allowlist` | 只放行命中 allow 规则的 IP，其余全拒 |
+| `denylist` | 命中 deny 规则的 IP 拒绝，其余放行 |
+
+生效范围：**全局模式 + 按代理覆盖**。某个代理没单独设置时继承全局。
+
+匹配规则：
+
+1. 先看该代理自己的规则，没有命中再回落到全局规则；
+2. 规则支持单个 IP 和 CIDR（`10.0.0.0/8`）；
+3. 多条命中时**最长前缀优先**（越精确越优先）；
+4. 前缀长度相同时 **deny 优先**（防止误放宽）；
+5. 过期规则（自助加白产生）在匹配阶段直接忽略，不用等清理。
+
+例子：全局 allow `10.0.0.0/8`，再给 `10.9.9.9` 加一条 deny，则 `10.1.2.3` 放行、`10.9.9.9` 被拒。
+
+## 5. 配置项
+
+| 配置 | 默认 | 说明 |
+|---|---|---|
+| `enable` | `false` | 总开关。关闭时不做判定，也不记录 |
+| `storePath` | `./.frps_ipaccess.json` | 规则与记录的数据文件，建议写绝对路径 |
+| `defaultMode` | `off` | 初始全局模式；运行时可改，改动会持久化 |
+| `retentionHours` | `168` | 访问记录保留时长（按最后访问时间） |
+| `maxRecords` | `50000` | 记录条数上限，超出后淘汰最久未见的 |
+| `enableSelfAllow` | `false` | 是否开放"自助加白"接口 |
+| `selfAllowHours` | `24` | 自助加白的默认有效期，可被请求参数覆盖 |
+
+## 6. 管理接口
+
+全部返回 `{"code":200,"msg":"success","data":...}`，鉴权沿用 Dashboard 的 Basic Auth。
+
+| 方法 | 路径 | 说明 |
+|---|---|---|
+| GET | `/api/v2/ip-access/settings` | 全局模式、规则数、记录数、保留策略 |
+| PUT | `/api/v2/ip-access/settings` | `{"globalMode":"allowlist"}` |
+| PUT | `/api/v2/ip-access/proxy-modes` | `{"proxyName":"web","mode":"denylist"}`，`mode:""` 表示继承 |
+| GET | `/api/v2/ip-access/rules` | 支持 `proxyName` / `action` / `page` / `pageSize` |
+| POST | `/api/v2/ip-access/rules` | `{"proxyName":"*","action":"allow","ip":"1.2.3.4","note":"..."}` |
+| DELETE | `/api/v2/ip-access/rules/{id}` | 删除一条规则 |
+| GET | `/api/v2/ip-access/records` | 支持 `proxyName` / `ip` / `result=allowed\|denied` / 分页 |
+| POST | `/api/v2/ip-access/records/delete` | `{"ids":[1,2]}` |
+| POST | `/api/v2/ip-access/prune` | 立即清理过期规则和记录 |
+| GET/POST | `/api/v2/ip-access/self-allow` | 自助加白，见下一节 |
+
+`proxyName` 为 `*` 表示全局规则。
+
+## 7. 自助加白（IP 会变的场景）
+
+手机流量、动态宽带这类公网 IP 经常变的场景，每次改了 IP 都去页面加一条太麻烦。
+开启后可以"敲门"式加白：
+
+```
+GET  /api/v2/ip-access/self-allow?hours=12     # 手机浏览器存成书签，打开即完成
+POST /api/v2/ip-access/self-allow              # 脚本定时调用
+```
+
+返回：
+
+```json
+{"code":200,"msg":"success","data":{"ip":"1.2.3.4","proxyName":"*","action":"allow","ruleId":12,"expiresAt":1793363639}}
+```
+
+行为约定：
+
+- **只加全局 allow 规则**，不支持指定代理；
+- **IP 不由调用方提供**，一律取 TCP 连接的来源地址；
+- **幂等**：同一 IP 反复调用只保留一条规则，`ruleId` 不变；已有有效期更长时不会被缩短，
+  间隔足够时按新的 `hours` 顺延（适合定时器）；
+- 有效期默认取 `selfAllowHours`，可用 `?hours=N` 覆盖，上限 **720 小时（30 天）**；
+- 到期后规则自动失效并被清理。
+
+安全设计（都是故意的）：
+
+| 措施 | 原因 |
+|---|---|
+| 必须配置了 `webServer.user` / `webServer.password`，否则返回 403 | frp 的 Basic Auth 中间件在账号密码都为空时是**全放行**的 |
+| 来源是回环地址时返回 400 | 说明请求经过了本机反向代理，加 `127.0.0.1` 没有意义，直接报错而不是静默加一条废规则 |
+| 开关默认关闭 | 升级不会凭空多出一个入口 |
+| `hours` 上限 720 | 避免一次调用把有效期设到天荒地老 |
+
+定时调用建议：**间隔 ≤ hours / 2**。例如 `hours=12` 就每 5~10 分钟调一次，
+IP 变了之后最多一个间隔即可恢复，且不会产生无意义的请求。
+
+## 8. Dashboard
+
+`http://<frps>:7500` → **IP Access**：
+
+- **Mode**：切换全局模式，查看/设置单个代理的覆盖；
+- **Rules**：增删规则，`Expires` 列显示有效期（`permanent` 表示永久），`api` 标记表示自助加白产生；
+- **Access records**：按代理/IP/结果筛选，可对某一行直接 **Allow / Deny** 生成规则，支持批量删除与立即 Prune。
+
+页面不自动刷新，点右上角 **Refresh** 获取最新记录。
+
+## 9. 数据存储与清理
+
+- 单文件存储（`storePath`），写入走"临时文件 + rename"，进程崩溃不会留下半个文件；
+- 记录改动**每 10 秒批量落盘**一次，不会每个连接都写盘；
+- 每 5 分钟清理一次过期记录与过期规则，也可在页面或调用 `prune` 手动触发；
+- 记录三重淘汰：按 `retentionHours` 过期 → 超过 `maxRecords` 时排序淘汰最久未见的 → 突发大量新 IP 时即时裁剪；
+- 规则和模式修改后重启 frps 依然有效。
+
+## 10. 本地验证
+
+仓库 `bin/` 下已带好可直接跑的配置（`bin/frps.toml` / `bin/frpc.toml`），
+在 `bin` 目录开三个终端：
+
+```powershell
+python -m http.server 18080     # 被代理的目标服务
+.\frps.exe -c frps.toml         # dashboard: http://127.0.0.1:17500  admin/admin123
+.\frpc.exe -c frpc.toml         # 把 127.0.0.1:18080 暴露到 18000
+```
+
+验证顺序（`allowlist` + 空规则开局）：
+
+1. 访问代理端口 → 被拒；
+2. 打开 Dashboard 的 IP Access → 记录里出现该 IP，`allowed=false`；
+3. 加一条 allow 规则（或在页面点该行的 **Allow**）→ 再访问 → 正常；
+4. 切到 `denylist`，把该 IP 加进 deny → 再访问 → 又被拒。
+
+验证自助加白时注意：从本机 `127.0.0.1` 调用会被回环校验拒掉（400），
+要用局域网 IP 访问一次，例如 `http://192.168.1.10:17500/api/v2/ip-access/self-allow`。
+
+## 11. 已知限制
+
+- 只覆盖 **tcp**；udp / http / https / tcpmux / stcp 等不生效。
+- 移动网络的出口是 CGNAT 共享地址，把"自己的 IP"加白，实际放行的是该 NAT 出口背后的一批用户，
+  frps 层面无法区分。这是场景固有问题。
+- 如果 frps 前面还有**公网**反向代理或 CDN，`RemoteAddr` 会是代理的地址，此时加白的是代理 IP
+  （回环反代的情况已被显式拒绝）。
+- 同一 IP 若已存在手工 deny 规则，同前缀长度下 deny 优先，此时自助加白会返回成功但实际仍被拦。
