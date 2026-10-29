@@ -30,7 +30,9 @@ import (
 
 const (
 	// flushInterval is how often the dirty access records are written to disk.
-	flushInterval = 10 * time.Second
+	// Records only live in memory between two flushes, so a crash may lose the
+	// last minute of them; rules are written synchronously and are never lost.
+	flushInterval = 60 * time.Second
 	// cleanupInterval is how often the expired records are removed.
 	cleanupInterval = 5 * time.Minute
 )
