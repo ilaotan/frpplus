@@ -17,6 +17,7 @@ package ipaccess
 import (
 	"cmp"
 	"fmt"
+	"maps"
 	"net/netip"
 	"slices"
 	"strings"
@@ -244,9 +245,7 @@ func (c *Controller) Settings() Settings {
 		RuleCount:      len(c.rules),
 		ProxyModes:     map[string]string{},
 	}
-	for name, mode := range c.proxyModes {
-		s.ProxyModes[name] = mode
-	}
+	maps.Copy(s.ProxyModes, c.proxyModes)
 	c.ruleMu.RUnlock()
 
 	c.recordMu.Lock()

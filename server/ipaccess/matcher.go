@@ -18,6 +18,7 @@ import (
 	"fmt"
 	"net"
 	"net/netip"
+	"slices"
 	"strings"
 )
 
@@ -173,10 +174,8 @@ func parseRemoteAddr(remoteAddr string) (netip.Addr, error) {
 // mode is only accepted by SetProxyMode, where it means "inherit".
 func normalizeMode(mode string) (string, error) {
 	m := strings.ToLower(strings.TrimSpace(mode))
-	for _, supported := range SupportedModes {
-		if m == supported {
-			return m, nil
-		}
+	if slices.Contains(SupportedModes, m) {
+		return m, nil
 	}
 	return "", fmt.Errorf("invalid mode %q, optional values are %v", mode, SupportedModes)
 }
@@ -184,10 +183,8 @@ func normalizeMode(mode string) (string, error) {
 // normalizeAction validates a rule action.
 func normalizeAction(action string) (string, error) {
 	a := strings.ToLower(strings.TrimSpace(action))
-	for _, supported := range SupportedActions {
-		if a == supported {
-			return a, nil
-		}
+	if slices.Contains(SupportedActions, a) {
+		return a, nil
 	}
 	return "", fmt.Errorf("invalid action %q, optional values are %v", action, SupportedActions)
 }
