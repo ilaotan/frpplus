@@ -97,6 +97,8 @@ type ServerConfig struct {
 	AllowPorts []types.PortsRange `json:"allowPorts,omitempty"`
 
 	HTTPPlugins []HTTPPluginOptions `json:"httpPlugins,omitempty"`
+
+	IPAccessControl IPAccessControlConfig `json:"ipAccessControl,omitempty"`
 }
 
 func (c *ServerConfig) Complete() error {
@@ -124,6 +126,7 @@ func (c *ServerConfig) Complete() error {
 	c.UserConnTimeout = util.EmptyOr(c.UserConnTimeout, 10)
 	c.UDPPacketSize = util.EmptyOr(c.UDPPacketSize, 1500)
 	c.NatHoleAnalysisDataReserveHours = util.EmptyOr(c.NatHoleAnalysisDataReserveHours, 7*24)
+	c.IPAccessControl.Complete()
 	return nil
 }
 
@@ -214,4 +217,53 @@ type SSHTunnelGateway struct {
 
 func (c *SSHTunnelGateway) Complete() {
 	c.AutoGenPrivateKeyPath = util.EmptyOr(c.AutoGenPrivateKeyPath, "./.autogen_ssh_key")
+}
+
+// IP access control modes of a tcp proxy.
+const (
+	// IPAccessModeOff disables the check, client addresses are still recorded.
+	IPAccessModeOff = "off"
+	// IPAccessModeAllowlist rejects every client IP not matched by an allow
+	// rule.
+	IPAccessModeAllowlist = "allowlist"
+	// IPAccessModeDenylist rejects every client IP matched by a deny rule.
+	IPAccessModeDenylist = "denylist"
+)
+
+// IPAccessControlConfig controls the client IP filtering of tcp proxies on the
+// server side. For tcp proxies the real client IP is only visible on the
+// server, the tunnel endpoint behind frpc only sees the loopback address, so
+// the check has to happen here.
+type IPAccessControlConfig struct {
+	// Enable turns on the ip access control. By default, this value is false.
+	Enable bool `json:"enable,omitempty"`
+	// StorePath specifies the file used to persist the rules and the access
+	// records. By default, this value is "./.frps_ipaccess.json".
+	StorePath string `json:"storePath,omitempty"`
+	// DefaultMode specifies the mode used by the proxies that do not set their
+	// own. Valid values are "off", "allowlist" and "denylist". By default,
+	// this value is "off".
+	DefaultMode string `json:"defaultMode,omitempty"`
+	// RetentionHours specifies how long an access record is kept since it was
+	// last seen. By default, this value is 168 (7 days).
+	RetentionHours int64 `json:"retentionHours,omitempty"`
+	// MaxRecords specifies the maximum number of access records kept in the
+	// store, the least recently seen records are removed first. By default,
+	// this value is 50000.
+	MaxRecords int64 `json:"maxRecords,omitempty"`
+	// EnableSelfAllow enables the self-allow API, which lets the dashboard
+	// account add its own client IP to the global allow list. It is meant for
+	// clients whose public IP keeps changing. By default, this value is false.
+	EnableSelfAllow bool `json:"enableSelfAllow,omitempty"`
+	// SelfAllowHours specifies the default validity of an IP added through the
+	// self-allow API, in hours. By default, this value is 24.
+	SelfAllowHours int64 `json:"selfAllowHours,omitempty"`
+}
+
+func (c *IPAccessControlConfig) Complete() {
+	c.StorePath = util.EmptyOr(c.StorePath, "./.frps_ipaccess.json")
+	c.DefaultMode = util.EmptyOr(c.DefaultMode, IPAccessModeOff)
+	c.RetentionHours = util.EmptyOr(c.RetentionHours, 7*24)
+	c.MaxRecords = util.EmptyOr(c.MaxRecords, 50000)
+	c.SelfAllowHours = util.EmptyOr(c.SelfAllowHours, 24)
 }

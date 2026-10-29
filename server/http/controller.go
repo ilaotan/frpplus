@@ -29,6 +29,7 @@ import (
 	"github.com/fatedier/frp/pkg/util/log"
 	"github.com/fatedier/frp/pkg/util/version"
 	"github.com/fatedier/frp/server/http/model"
+	"github.com/fatedier/frp/server/ipaccess"
 	"github.com/fatedier/frp/server/proxy"
 	"github.com/fatedier/frp/server/registry"
 )
@@ -38,6 +39,7 @@ type Controller struct {
 	serverCfg      *v1.ServerConfig
 	clientRegistry *registry.ClientRegistry
 	pxyManager     ProxyManager
+	ipAccessCtl    *ipaccess.Controller
 }
 
 type ProxyManager interface {
@@ -48,11 +50,13 @@ func NewController(
 	serverCfg *v1.ServerConfig,
 	clientRegistry *registry.ClientRegistry,
 	pxyManager ProxyManager,
+	ipAccessCtl *ipaccess.Controller,
 ) *Controller {
 	return &Controller{
 		serverCfg:      serverCfg,
 		clientRegistry: clientRegistry,
 		pxyManager:     pxyManager,
+		ipAccessCtl:    ipAccessCtl,
 	}
 }
 

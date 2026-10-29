@@ -4,6 +4,7 @@ import Clients from '../views/Clients.vue'
 import ClientDetail from '../views/ClientDetail.vue'
 import Proxies from '../views/Proxies.vue'
 import ProxyDetail from '../views/ProxyDetail.vue'
+import IPAccess from '../views/IPAccess.vue'
 
 const router = createRouter({
   history: createWebHashHistory(),
@@ -35,6 +36,11 @@ const router = createRouter({
       path: '/proxy/:name',
       name: 'ProxyDetail',
       component: ProxyDetail,
+    },
+    {
+      path: '/ip-access',
+      name: 'IPAccess',
+      component: IPAccess,
     },
   ],
 })

@@ -112,6 +112,13 @@ export const http = {
       headers: { 'Content-Type': 'application/json', ...options?.headers },
       body: JSON.stringify(body),
     }),
+  putV2: <T>(url: string, body?: any, options?: RequestInit) =>
+    requestV2<T>(url, {
+      ...options,
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json', ...options?.headers },
+      body: JSON.stringify(body),
+    }),
   put: <T>(url: string, body?: any, options?: RequestInit) =>
     request<T>(url, {
       ...options,

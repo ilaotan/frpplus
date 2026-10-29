@@ -55,6 +55,7 @@ import (
 	"github.com/fatedier/frp/pkg/util/xlog"
 	"github.com/fatedier/frp/server/controller"
 	"github.com/fatedier/frp/server/group"
+	"github.com/fatedier/frp/server/ipaccess"
 	"github.com/fatedier/frp/server/ports"
 	"github.com/fatedier/frp/server/proxy"
 	"github.com/fatedier/frp/server/registry"
@@ -113,6 +114,9 @@ type Service struct {
 
 	// Manage all plugins
 	pluginManager *plugin.Manager
+
+	// IP access control for tcp user connections
+	ipAccessCtl *ipaccess.Controller
 
 	// HTTP vhost router
 	httpVhostRouter *vhost.Routers
@@ -349,6 +353,18 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 	}
 	svr.rc.NatHoleController = nc
 
+	// Create ip access controller for the user connections of tcp proxies.
+	if cfg.IPAccessControl.Enable {
+		ipAccessCtl, err := ipaccess.New(cfg.IPAccessControl)
+		if err != nil {
+			_ = svr.Close()
+			return nil, fmt.Errorf("create ip access controller error: %v", err)
+		}
+		svr.ipAccessCtl = ipAccessCtl
+		svr.rc.IPAccessController = ipAccessCtl
+		log.Infof("ip access control enabled, store: %s", cfg.IPAccessControl.StorePath)
+	}
+
 	// Create HTTP servers after all other fallible steps, rolling back listeners
 	// if either server cannot be created.
 	if cfg.WebServer.Port > 0 {
@@ -515,6 +531,11 @@ func (svr *Service) closeResources() {
 	}
 	if svr.sshTunnelGateway != nil {
 		svr.sshTunnelGateway.Close()
+	}
+	if svr.ipAccessCtl != nil {
+		if err := svr.ipAccessCtl.Close(); err != nil {
+			log.Warnf("close ip access controller error: %v", err)
+		}
 	}
 	svr.rc.Close()
 	svr.muxer.Close()

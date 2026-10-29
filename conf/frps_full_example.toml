@@ -181,3 +181,30 @@ name = "port-manager"
 addr = "127.0.0.1:9001"
 path = "/handler"
 ops = ["NewProxy"]
+
+# ip access control for tcp proxies
+# The real client ip of a tcp proxy connection is only known by the server,
+# so the allow/deny check is done here before the work connection is allocated.
+# Rules, per proxy modes and the access records are managed in the dashboard
+# and persisted in storePath, so they survive a restart.
+[ipAccessControl]
+# By default, this feature is disabled.
+enable = false
+# File used to persist rules and access records.
+storePath = "./.frps_ipaccess.json"
+# Mode used by the proxies that do not set their own, optional values are
+# "off", "allowlist" and "denylist".
+defaultMode = "off"
+# Access records are removed after this many hours without being seen.
+retentionHours = 168
+# Maximum number of access records kept in the store, the least recently seen
+# records are removed first.
+maxRecords = 50000
+# Enable the self-allow api, POST/GET /api/v2/ip-access/self-allow, which adds
+# the client ip of the caller to the global allow list. It is protected by the
+# webServer basic auth, so webServer.user and webServer.password must be set.
+# It is meant for callers whose public ip keeps changing.
+enableSelfAllow = false
+# Default validity in hours of an ip added by the self-allow api, it can be
+# overridden per request with the hours query parameter (max 720).
+selfAllowHours = 24

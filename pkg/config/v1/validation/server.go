@@ -66,5 +66,34 @@ func (v *ConfigValidator) ValidateServerConfig(c *v1.ServerConfig) (Warning, err
 			errs = AppendError(errs, fmt.Errorf("invalid http plugin ops, optional values are %v", SupportedHTTPPluginOps))
 		}
 	}
+	if err := validateIPAccessControlConfig(&c.IPAccessControl); err != nil {
+		errs = AppendError(errs, err)
+	}
 	return warnings, errs
+}
+
+var supportedIPAccessModes = []string{
+	v1.IPAccessModeOff,
+	v1.IPAccessModeAllowlist,
+	v1.IPAccessModeDenylist,
+}
+
+// maxSelfAllowHours is the longest validity accepted for an IP added through
+// the self-allow API, 30 days.
+const maxSelfAllowHours = 24 * 30
+
+func validateIPAccessControlConfig(c *v1.IPAccessControlConfig) error {
+	if !slices.Contains(supportedIPAccessModes, c.DefaultMode) {
+		return fmt.Errorf("invalid ipAccessControl.defaultMode %q, optional values are %v", c.DefaultMode, supportedIPAccessModes)
+	}
+	if c.RetentionHours <= 0 {
+		return fmt.Errorf("invalid ipAccessControl.retentionHours, must be positive")
+	}
+	if c.MaxRecords <= 0 {
+		return fmt.Errorf("invalid ipAccessControl.maxRecords, must be positive")
+	}
+	if c.SelfAllowHours <= 0 || c.SelfAllowHours > maxSelfAllowHours {
+		return fmt.Errorf("invalid ipAccessControl.selfAllowHours, must be between 1 and %d", maxSelfAllowHours)
+	}
+	return nil
 }

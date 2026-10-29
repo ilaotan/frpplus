@@ -20,6 +20,7 @@ import (
 	"github.com/fatedier/frp/pkg/util/tcpmux"
 	"github.com/fatedier/frp/pkg/util/vhost"
 	"github.com/fatedier/frp/server/group"
+	"github.com/fatedier/frp/server/ipaccess"
 	"github.com/fatedier/frp/server/ports"
 	"github.com/fatedier/frp/server/visitor"
 )
@@ -55,6 +56,9 @@ type ResourceController struct {
 
 	// Controller for nat hole connections
 	NatHoleController *nathole.Controller
+
+	// Controller for the client ip access control of tcp proxies
+	IPAccessController *ipaccess.Controller
 
 	// TCPMux HTTP CONNECT multiplexer
 	TCPMuxHTTPConnectMuxer *tcpmux.HTTPConnectTCPMuxer

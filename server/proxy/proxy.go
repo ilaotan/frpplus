@@ -272,6 +272,18 @@ func (pxy *BaseProxy) handleUserTCPConnection(userConn net.Conn) {
 	cfg := pxy.configurer.GetBaseConfig()
 	// server plugin hook
 	rc := pxy.GetResourceController()
+
+	// The real client ip of a tcp proxy connection is only visible on the
+	// server, the proxy target behind frpc only sees the loopback address.
+	// Filter it here before any work connection is allocated.
+	if rc.IPAccessController != nil {
+		decision := rc.IPAccessController.Check(cfg.Type, pxy.GetName(), userConn.RemoteAddr().String())
+		if !decision.Allowed {
+			xl.Warnf("the user conn [%s] was rejected by ip access control: %s", userConn.RemoteAddr().String(), decision.Reason)
+			return
+		}
+	}
+
 	content := &plugin.NewUserConnContent{
 		User:       pxy.GetUserInfo(),
 		ProxyName:  pxy.GetName(),

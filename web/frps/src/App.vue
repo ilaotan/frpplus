@@ -80,6 +80,14 @@
           >
             Proxies
           </router-link>
+          <router-link
+            to="/ip-access"
+            class="sidebar-link"
+            :class="{ active: route.path.startsWith('/ip-access') }"
+            @click="closeSidebar"
+          >
+            IP Access
+          </router-link>
         </nav>
       </aside>
 

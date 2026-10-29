@@ -36,7 +36,7 @@ func (svr *Service) registerRouteHandlers(helper *httppkg.RouterRegisterHelper) 
 		subRouter.Handle("/metrics", promhttp.Handler())
 	}
 
-	apiController := adminapi.NewController(svr.cfg, svr.clientRegistry, svr.pxyManager)
+	apiController := adminapi.NewController(svr.cfg, svr.clientRegistry, svr.pxyManager, svr.ipAccessCtl)
 
 	// apis
 	subRouter.HandleFunc("/api/serverinfo", httppkg.MakeHTTPHandlerFunc(apiController.APIServerInfo)).Methods("GET")
@@ -58,6 +58,20 @@ func (svr *Service) registerRouteHandlers(helper *httppkg.RouterRegisterHelper) 
 	subRouter.HandleFunc("/api/v2/proxies", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2ProxyList)).Methods("GET")
 	v2EncodedPathRouter.HandleFunc("/api/v2/proxies/{name}/traffic", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2ProxyTraffic)).Methods("GET")
 	v2EncodedPathRouter.HandleFunc("/api/v2/proxies/{name}", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2ProxyDetail)).Methods("GET")
+
+	// ip access control of tcp proxies
+	subRouter.HandleFunc("/api/v2/ip-access/settings", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessSettings)).Methods("GET")
+	subRouter.HandleFunc("/api/v2/ip-access/settings", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessUpdateSettings)).Methods("PUT")
+	subRouter.HandleFunc("/api/v2/ip-access/proxy-modes", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessUpdateProxyMode)).Methods("PUT")
+	subRouter.HandleFunc("/api/v2/ip-access/rules", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessRuleList)).Methods("GET")
+	subRouter.HandleFunc("/api/v2/ip-access/rules", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessRuleCreate)).Methods("POST")
+	subRouter.HandleFunc("/api/v2/ip-access/rules/{id}", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessRuleDelete)).Methods("DELETE")
+	subRouter.HandleFunc("/api/v2/ip-access/records", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessRecordList)).Methods("GET")
+	subRouter.HandleFunc("/api/v2/ip-access/records/delete", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessRecordDelete)).Methods("POST")
+	subRouter.HandleFunc("/api/v2/ip-access/prune", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessPrune)).Methods("POST")
+	// Self allow lets the dashboard account add its own client IP to the global
+	// allow list, GET is there so that a phone bookmark can be used as a knock.
+	subRouter.HandleFunc("/api/v2/ip-access/self-allow", httppkg.MakeHTTPHandlerFuncV2(apiController.APIV2IPAccessSelfAllow)).Methods("GET", "POST")
 
 	// view
 	subRouter.Handle("/favicon.ico", http.FileServer(helper.AssetsFS)).Methods("GET")
