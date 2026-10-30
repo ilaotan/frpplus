@@ -122,3 +122,21 @@ GoReleaser will:
 
 - Minor release: `v0.X.0`
 - Patch release: `v0.X.Y` (e.g., `v0.62.1`)
+
+## Fork Builds (this repository)
+
+`pkg/util/version/version.go` is kept identical to upstream on purpose, the fork
+build number is injected at build time, so a binary reports
+`<upstream version>.plus.<n>` (for example `0.71.1.plus.1`).
+
+```bash
+bash hack/build-release.sh              # next build number
+bash hack/build-release.sh -b 3         # force the number
+bash hack/build-release.sh --no-web     # keep the existing web dist
+bash hack/build-release.sh -p "linux/amd64 linux/arm64"
+```
+
+It cross compiles `windows/amd64`, `linux/amd64`, `linux/arm` (GOARM=7) and
+`linux/arm64` with `CGO_ENABLED=0 -trimpath -ldflags "-s -w"`, packs one zip per
+platform into `bin/` (staged trees stay in `release/pack/`), checks the version
+reported by the host binary and prints the sha256 of every package.

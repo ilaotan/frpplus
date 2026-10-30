@@ -14,8 +14,19 @@
 
 package version
 
-var version = "0.71.1.plus"
+// version tracks the upstream frp version. Keep it identical to upstream so
+// that syncing with upstream never conflicts.
+var version = "0.71.1"
+
+// buildVersion is injected at build time by hack/build-release.sh, for example
+// -ldflags "-X github.com/fatedier/frp/pkg/util/version.buildVersion=0.71.1.plus.1".
+// It carries the fork specific build number; when empty the plain upstream
+// version is reported.
+var buildVersion = ""
 
 func Full() string {
+	if buildVersion != "" {
+		return buildVersion
+	}
 	return version
 }
