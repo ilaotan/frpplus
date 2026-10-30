@@ -127,13 +127,13 @@ GoReleaser will:
 
 `pkg/util/version/version.go` is kept identical to upstream on purpose, the fork
 build number is injected at build time, so a binary reports
-`<upstream version>.plus.<n>` (for example `0.71.1.plus.1`).
+`frp_<upstream version>.plus.<n>` (for example `frp_0.71.1.plus.3`).
 
 ```bash
-bash hack/build-release.sh              # next build number
-bash hack/build-release.sh -b 3         # force the number
-bash hack/build-release.sh --no-web     # keep the existing web dist
-bash hack/build-release.sh -p "linux/amd64 linux/arm64"
+bash hack/build-release.sh -b 3         # build number, required
+bash hack/build-release.sh -b 3 --no-web # keep the existing web dist
+bash hack/build-release.sh -b 3 --no-upx # keep the binaries uncompressed
+bash hack/build-release.sh -b 3 -p "linux/amd64 linux/arm64"
 ```
 
 It cross compiles `windows/amd64`, `linux/amd64`, `linux/arm` (GOARM=7) and
@@ -141,14 +141,19 @@ It cross compiles `windows/amd64`, `linux/amd64`, `linux/arm` (GOARM=7) and
 platform into `bin/` (staged trees stay in `release/pack/`), checks the version
 reported by the host binary and prints the sha256 of every package.
 
-The binaries inside a package are named `frpsplus` and `frpcplus` (with `.exe` on
-windows), the archive is `frpsplus_<version>_<os>_<arch>.zip` and the folder
-inside it carries the same name:
+The binaries are compressed with UPX when it is available, which cuts them to
+roughly 30% of their original size. Set `UPX_BIN` to point at a specific `upx`
+executable, or pass `--no-upx` to ship them uncompressed.
+
+The binaries inside a package are named `frpsplustiny` and `frpcplustiny` (with
+`.exe` on windows), the archive is
+`frpsplustiny_<version>_<os>_<arch>.zip` and the folder inside it carries the
+same name:
 
 ```
-frpsplus_0.71.1.plus.2_linux_amd64/
-├── frpsplus
-├── frpcplus
+frpsplustiny_frp_0.71.1.plus.3_linux_amd64/
+├── frpsplustiny
+├── frpcplustiny
 ├── frps.example.toml
 ├── frpc.example.toml
 └── LICENSE
