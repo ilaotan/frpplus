@@ -102,38 +102,20 @@ selfAllowHours = 24
 
 ## 6. 管理接口
 
-### 6.1 通用约定
+### 6.1 先确认能连通
 
-- **鉴权**：Dashboard 的 Basic Auth（`webServer.user` / `webServer.password`），没有额外的 token；
-- **编码**：请求与响应都是 UTF-8 JSON，写操作必须带 `Content-Type: application/json`；
-- **返回**：`{"code":200,"msg":"success","data":...}`；失败时 `code` 是 HTTP 状态码，`msg` 是原因；
-- **地址**：示例用 `http://192.168.1.10:7500`，换成你 frps 的实际地址。
-
-先设两个变量，后面所有命令直接复用：
+下面所有命令都按仓库自带的 `bin/frps.toml` 写：地址 `127.0.0.1:17500`，账号 `admin`，密码 `admin123`。
+换环境只改这三处。
 
 ```bash
-BASE=http://192.168.1.10:7500/api/v2/ip-access
-AUTH=admin:your-password          # = webServer.user:webServer.password
+curl -s -u admin:admin123 http://127.0.0.1:17500/api/v2/ip-access/settings
 ```
 
-Windows 上两个必踩的坑：
+能返回 `{"code":200,...}` 就说明通了。Windows 终端里 `curl` 是 `Invoke-WebRequest` 的别名，要写 **`curl.exe`**；
+机器上设了 `http_proxy` 时再加 `--noproxy "*"`：
 
 ```bat
-:: 1) cmd 里没有 curl，Windows 10/11 自带 curl.exe，直接写 curl 即可
-:: 2) 机器上设了 http_proxy 时，本地请求要加 --noproxy "*"，否则会被送去代理
-
-curl.exe -s --noproxy "*" -u admin:your-password http://192.168.1.10:7500/api/v2/ip-access/settings
-```
-
-> 在 Windows 的终端里如果 `curl` 报"找不到参数"或返回 `Invoke-WebRequest` 的对象，说明用的是那个同名别名，写 `curl.exe` 就对了。
-
-`-u` 只是把凭证编码成 `Authorization: Basic base64(user:pass)`，等价的手写请求头：
-
-```bash
-# base64('admin:your-password') = YWRtaW46eW91ci1wYXNzd29yZA==
-curl -s -H "Authorization: Basic YWRtaW46eW91ci1wYXNzd29yZA==" \
-     -H "Accept: application/json" \
-     "$BASE/settings"
+curl.exe -s --noproxy "*" -u admin:admin123 http://127.0.0.1:17500/api/v2/ip-access/settings
 ```
 
 ### 6.2 接口清单
@@ -153,143 +135,94 @@ curl -s -H "Authorization: Basic YWRtaW46eW91ci1wYXNzd29yZA==" \
 | GET | `/current-ip` | 回显请求方地址与是否回环 |
 | POST | `/allow-current-ip` | 把当前请求方 IP 加进全局 allow，`hours:0` 为永久 |
 
-### 6.3 curl 示例
+### 6.3 curl 示例（直接复制执行）
 
-**查看设置**
-
-```bash
-curl -s -u "$AUTH" "$BASE/settings"
-```
-
-```json
-{"code":200,"msg":"success","data":{
-  "enabled":true,"storePath":"/var/lib/frp/ipaccess.json","globalMode":"allowlist",
-  "ruleCount":2,"recordCount":18,"retentionHours":168,"maxRecords":5000,
-  "proxyModes":[],"types":["tcp"]}}
-```
-
-**切换全局模式**
+**查设置**
 
 ```bash
-curl -s -u "$AUTH" -X PUT -H "Content-Type: application/json" \
-     -d '{"globalMode":"allowlist"}' "$BASE/settings"
+curl -s -u admin:admin123 http://127.0.0.1:17500/api/v2/ip-access/settings
 ```
 
-**设置 / 取消单个代理的模式**（`mode` 传空串表示回到继承全局）
+**切全局模式**
 
 ```bash
-curl -s -u "$AUTH" -X PUT -H "Content-Type: application/json" \
-     -d '{"proxyName":"web","mode":"denylist"}' "$BASE/proxy-modes"
-
-curl -s -u "$AUTH" -X PUT -H "Content-Type: application/json" \
-     -d '{"proxyName":"web","mode":""}' "$BASE/proxy-modes"
+curl -s -u admin:admin123 -X PUT -H "Content-Type: application/json" -d '{"globalMode":"allowlist"}' http://127.0.0.1:17500/api/v2/ip-access/settings
 ```
 
-**新增规则**（`proxyName` 用 `*` 表示全局，`ip` 可以是单地址或 CIDR）
+**单个代理覆盖模式**（`mode` 传空串表示回到继承全局）
 
 ```bash
-curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
-     -d '{"proxyName":"*","action":"allow","ip":"203.0.113.7","note":"office"}' \
-     "$BASE/rules"
+curl -s -u admin:admin123 -X PUT -H "Content-Type: application/json" -d '{"proxyName":"web","mode":"denylist"}' http://127.0.0.1:17500/api/v2/ip-access/proxy-modes
 ```
 
-```json
-{"code":200,"msg":"success","data":{"id":7,"proxyName":"*","action":"allow",
- "ip":"203.0.113.7","note":"office","createdAt":1793363639,"source":"manual"}}
+**加规则**（`proxyName` 用 `*` 表示全局，`ip` 支持 CIDR）
+
+```bash
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"proxyName":"*","action":"allow","ip":"203.0.113.7","note":"office"}' http://127.0.0.1:17500/api/v2/ip-access/rules
 ```
 
 **查规则 / 删规则**
 
 ```bash
-curl -s -u "$AUTH" "$BASE/rules?page=1&pageSize=50"
-curl -s -u "$AUTH" "$BASE/rules?action=deny"
-curl -s -u "$AUTH" -X DELETE "$BASE/rules/7"
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/rules?page=1&pageSize=50"
+curl -s -u admin:admin123 -X DELETE http://127.0.0.1:17500/api/v2/ip-access/rules/7
 ```
 
 **查访问记录**（`result` 取 `allowed` / `denied`）
 
 ```bash
-curl -s -u "$AUTH" "$BASE/records?page=1&pageSize=50"
-curl -s -u "$AUTH" "$BASE/records?result=denied&ip=203.0.113.7"
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/records?result=denied"
 ```
 
-**删记录 / 立即清理**
+**清过期数据**
 
 ```bash
-curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
-     -d '{"ids":[3,4]}' "$BASE/records/delete"
-
-curl -s -u "$AUTH" -X POST "$BASE/prune"
+curl -s -u admin:admin123 -X POST http://127.0.0.1:17500/api/v2/ip-access/prune
 ```
 
-```json
-{"code":200,"msg":"success","data":{"cleared":2,"total":16}}
-```
-
-**当前请求方 IP**（只读，不产生规则）
+**当前请求方 IP / 一键放行（`hours:0` 永久）**
 
 ```bash
-curl -s -u "$AUTH" "$BASE/current-ip"
+curl -s -u admin:admin123 http://127.0.0.1:17500/api/v2/ip-access/current-ip
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"hours":24}' http://127.0.0.1:17500/api/v2/ip-access/allow-current-ip
 ```
 
-```json
-{"code":200,"msg":"success","data":{"ip":"203.0.113.7","loopback":false}}
-```
-
-**一键放行当前 IP**（`hours:0` 表示永久；允许回环地址）
-
-```bash
-curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
-     -d '{"hours":24}' "$BASE/allow-current-ip"
-
-curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
-     -d '{"hours":0}' "$BASE/allow-current-ip"
-```
+> cmd / 那个 Windows 终端里 `-d '...'` 要改成转义写法 `-d "{\"globalMode\":\"allowlist\"}"`，其余不变；
+> 或者直接用 Git Bash 跑上面的原文。
 
 ## 7. 自助加白（IP 会变的场景）
 
-手机流量、动态宽带这类公网 IP 经常变的场景，每次改了 IP 都去页面加一条太麻烦。
-开启后可以"敲门"式加白——**接口只把调用方自己的地址加进全局 allow，不接受传入 IP**。
+手机流量、动态宽带这类公网 IP 经常变，每次改 IP 都去页面加一条太麻烦。
+接口**只把调用方自己的地址**加进全局 allow，不接受传入 IP。
 
 前提：配置里 `enableSelfAllow = true`，且 `webServer.user` / `webServer.password` 都不为空。
 
-### 7.1 GET：手机书签式
+### 7.1 三条命令
 
 ```bash
-curl -s -u "$AUTH" "$BASE/self-allow?hours=12"
+# 1) 加白 12 小时（GET，浏览器书签也能用）
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?hours=12"
+
+# 2) POST，hours 放 body
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"hours":12}' http://127.0.0.1:17500/api/v2/ip-access/self-allow
+
+# 3) 什么都不带，用配置里的 selfAllowHours
+curl -s -u admin:admin123 -X POST http://127.0.0.1:17500/api/v2/ip-access/self-allow
 ```
 
-不传 `hours` 就用配置的 `selfAllowHours`（默认 24）。存成手机浏览器书签时，把凭证放进 URL
-（浏览器会提示一次并记住），打开即完成加白，无需输入任何命令。
+Windows 终端里 POST 的 JSON 引号要转义：
 
-### 7.2 POST：脚本定时调用
-
-`hours` 放 body 或 query 都可以，**query 优先**：
-
-```bash
-# body
-curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
-     -d '{"hours":12}' "$BASE/self-allow"
-
-# query
-curl -s -u "$AUTH" -X POST "$BASE/self-allow?hours=12"
-
-# 都不带 → 用配置里的 selfAllowHours
-curl -s -u "$AUTH" -X POST "$BASE/self-allow"
+```bat
+curl.exe -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d "{\"hours\":12}" http://127.0.0.1:17500/api/v2/ip-access/self-allow
 ```
 
-手写请求头（放进脚本或其它语言里更直观）：
+手机书签直接存这个地址（浏览器弹一次账号密码框，记住即可）——注意把 `127.0.0.1` 换成 frps 的局域网地址：
 
-```bash
-curl -s -X POST \
-     -H "Authorization: Basic YWRtaW46eW91ci1wYXNzd29yZA==" \
-     -H "Content-Type: application/json" \
-     -H "Accept: application/json" \
-     -d '{"hours":12}' \
-     "http://192.168.1.10:7500/api/v2/ip-access/self-allow"
+```
+http://192.168.1.10:17500/api/v2/ip-access/self-allow?hours=12
 ```
 
-### 7.3 返回与含义
+### 7.2 返回值
 
 ```json
 {"code":200,"msg":"success","data":{
@@ -309,7 +242,7 @@ curl -s -u "$AUTH" "$BASE/self-allow?hours=24"    # 仍 ruleId 12, expiresAt = n
 curl -s -u "$AUTH" "$BASE/self-allow?hours=1"     # 已有有效期更长，原样返回，不变
 ```
 
-### 7.4 行为约定
+### 7.3 行为约定
 
 - **只加全局 allow 规则**，不支持指定代理；
 - **IP 不由调用方提供**，一律取 TCP 连接的来源地址；
@@ -320,7 +253,7 @@ curl -s -u "$AUTH" "$BASE/self-allow?hours=1"     # 已有有效期更长，原�
 
 定时调用建议：**间隔 ≤ hours / 2**，例如 `hours=12` 就每 5~10 分钟调一次。
 
-### 7.5 常见错误
+### 7.4 常见错误
 
 | HTTP | msg 关键字 | 原因与处理 |
 |---|---|---|
