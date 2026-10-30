@@ -209,3 +209,7 @@ enableSelfAllow = false
 # Default validity in hours of an ip added by the self-allow api, it can be
 # overridden per request with the hours query parameter (max 720).
 selfAllowHours = 24
+# Proxy types the check applies to: tcp, http, https, tcpmux. Visitor based
+# proxies (stcp, xtcp, sudp) are not supported, on the server side they only
+# see the address of the visitor.
+types = ["tcp"]

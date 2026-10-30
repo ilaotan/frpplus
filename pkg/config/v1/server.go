@@ -259,6 +259,11 @@ type IPAccessControlConfig struct {
 	// SelfAllowHours specifies the default validity of an IP added through the
 	// self-allow API, in hours. By default, this value is 24.
 	SelfAllowHours int64 `json:"selfAllowHours,omitempty"`
+	// Types lists the proxy types the check applies to. Supported values are
+	// tcp, http, https and tcpmux; visitor based proxies (stcp, xtcp, sudp) see
+	// the address of the visitor, not of the end user, and are not supported.
+	// By default, this value is ["tcp"].
+	Types []string `json:"types,omitempty"`
 }
 
 func (c *IPAccessControlConfig) Complete() {
@@ -267,4 +272,7 @@ func (c *IPAccessControlConfig) Complete() {
 	c.RetentionHours = util.EmptyOr(c.RetentionHours, 7*24)
 	c.MaxRecords = util.EmptyOr(c.MaxRecords, 5000)
 	c.SelfAllowHours = util.EmptyOr(c.SelfAllowHours, 24)
+	if len(c.Types) == 0 {
+		c.Types = []string{string(ProxyTypeTCP)}
+	}
 }

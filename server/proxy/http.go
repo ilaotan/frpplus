@@ -55,6 +55,7 @@ func NewHTTPProxy(baseProxy *BaseProxy) Proxy {
 func (pxy *HTTPProxy) Run() (remoteAddr string, err error) {
 	xl := pxy.xl
 	routeConfig := vhost.RouteConfig{
+		ProxyName:       pxy.GetName(),
 		RewriteHost:     pxy.cfg.HostHeaderRewrite,
 		RouteByHTTPUser: pxy.cfg.RouteByHTTPUser,
 		Headers:         pxy.cfg.RequestHeaders.Set,

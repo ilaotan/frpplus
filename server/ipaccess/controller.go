@@ -50,6 +50,10 @@ type Controller struct {
 	recordMu sync.Mutex
 	records  map[string]*Record
 
+	// types holds the proxy types that are subject to the check, built once
+	// from the configuration.
+	types map[string]struct{}
+
 	nextID atomic.Uint64
 
 	stop      chan struct{}
@@ -77,21 +81,40 @@ func New(cfg v1.IPAccessControlConfig) (*Controller, error) {
 		globalMode: mode,
 		proxyModes: map[string]string{},
 		records:    map[string]*Record{},
+		types:      map[string]struct{}{},
 		stop:       make(chan struct{}),
+	}
+	// An empty list is treated as tcp only, the same as the configuration
+	// default.
+	if len(cfg.Types) == 0 {
+		c.types[string(v1.ProxyTypeTCP)] = struct{}{}
+	}
+	for _, t := range cfg.Types {
+		c.types[t] = struct{}{}
 	}
 	if err := c.load(); err != nil {
 		return nil, err
 	}
 
-	c.wg.Add(2)
+	c.wg.Add(1)
 	go c.cleanupLoop()
 	return c, nil
 }
 
-// Check decides whether a user connection should be allowed. Every tcp user
-// connection is recorded, whatever the decision is.
+// Types returns the proxy types that are subject to the check.
+func (c *Controller) Types() []string {
+	types := make([]string, 0, len(c.types))
+	for t := range c.types {
+		types = append(types, t)
+	}
+	slices.Sort(types)
+	return types
+}
+
+// Check decides whether a user connection should be allowed. Every connection
+// of a covered proxy type is recorded, whatever the decision is.
 func (c *Controller) Check(proxyType, proxyName, remoteAddr string) Decision {
-	if proxyType != string(v1.ProxyTypeTCP) {
+	if _, ok := c.types[proxyType]; !ok {
 		return Decision{Allowed: true, Reason: "ip access control does not apply to this proxy type"}
 	}
 	addr, err := parseRemoteAddr(remoteAddr)

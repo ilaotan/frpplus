@@ -82,6 +82,16 @@ var supportedIPAccessModes = []string{
 // the self-allow API, 30 days.
 const maxSelfAllowHours = 24 * 30
 
+// supportedIPAccessTypes are the proxy types the ip access control can judge.
+// Visitor based proxies are missing on purpose: on the server side they only
+// see the address of the visitor, not of the end user.
+var supportedIPAccessTypes = []string{
+	string(v1.ProxyTypeTCP),
+	string(v1.ProxyTypeHTTP),
+	string(v1.ProxyTypeHTTPS),
+	string(v1.ProxyTypeTCPMUX),
+}
+
 func validateIPAccessControlConfig(c *v1.IPAccessControlConfig) error {
 	if !slices.Contains(supportedIPAccessModes, c.DefaultMode) {
 		return fmt.Errorf("invalid ipAccessControl.defaultMode %q, optional values are %v", c.DefaultMode, supportedIPAccessModes)
@@ -94,6 +104,11 @@ func validateIPAccessControlConfig(c *v1.IPAccessControlConfig) error {
 	}
 	if c.SelfAllowHours <= 0 || c.SelfAllowHours > maxSelfAllowHours {
 		return fmt.Errorf("invalid ipAccessControl.selfAllowHours, must be between 1 and %d", maxSelfAllowHours)
+	}
+	for _, t := range c.Types {
+		if !slices.Contains(supportedIPAccessTypes, t) {
+			return fmt.Errorf("invalid ipAccessControl.types value %q, optional values are %v", t, supportedIPAccessTypes)
+		}
 	}
 	return nil
 }

@@ -1,6 +1,7 @@
-# TCP 代理的客户端 IP 准入控制（IP Access）
+# 客户端 IP 准入控制（IP Access）
 
-> 本特性是 frp 的本地增强，只作用于 **tcp 类型**的代理。
+> 本特性是 frp 的本地增强。默认只作用于 **tcp** 代理，可通过 `types` 打开
+> `http` / `https` / `tcpmux`；visitor 型代理（stcp / xtcp / sudp）不支持。
 
 ## 1. 解决什么问题
 
@@ -95,6 +96,7 @@ selfAllowHours = 24
 | `defaultMode` | `off` | 初始全局模式；运行时可改，改动会持久化 |
 | `retentionHours` | `168` | 内存中访问记录的保留时长（按最后访问时间） |
 | `maxRecords` | `5000` | 内存中缓存的记录条数上限，超出后淘汰最久未访问的（不落盘） |
+| `types` | `["tcp"]` | 生效的代理类型，可选 `tcp` / `http` / `https` / `tcpmux` |
 | `enableSelfAllow` | `false` | 是否开放"自助加白"接口 |
 | `selfAllowHours` | `24` | 自助加白的默认有效期，可被请求参数覆盖 |
 
@@ -207,7 +209,12 @@ python -m http.server 18080     # 被代理的目标服务
 
 ## 11. 已知限制
 
-- 只覆盖 **tcp**；udp / http / https / tcpmux / stcp 等不生效。
+- 生效范围由 `types` 决定：`tcp`（默认）、`http`、`https`、`tcpmux`。
+  `udp` / `sudp` 未实现（每包判定需要额外的节流设计）；
+  `stcp` / `xtcp` 不支持——frps 看到的"用户连接"其实是 visitor（另一个 frpc），
+  拦到的是 visitor 的地址，管不到最终用户。
+- `http` 场景下，若 frps 前面还有 nginx / CDN，`RemoteAddr` 是代理的地址；此时规则应针对代理 IP，
+  或者改用 `https` + 在代理上做真实 IP 透传。
 - 移动网络的出口是 CGNAT 共享地址，把"自己的 IP"加白，实际放行的是该 NAT 出口背后的一批用户，
   frps 层面无法区分。这是场景固有问题。
 - 如果 frps 前面还有**公网**反向代理或 CDN，`RemoteAddr` 会是代理的地址，此时加白的是代理 IP

@@ -112,6 +112,8 @@ type CreateConnByEndpointFunc func(endpoint, remoteAddr string) (net.Conn, error
 
 // RouteConfig is the params used to match HTTP requests
 type RouteConfig struct {
+	// ProxyName is the name of the proxy that registered this route.
+	ProxyName       string
 	Domain          string
 	Location        string
 	RewriteHost     string

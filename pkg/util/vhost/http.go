@@ -37,6 +37,10 @@ var ErrNoRouteFound = errors.New("no route found")
 
 type HTTPReverseProxyOptions struct {
 	ResponseHeaderTimeoutS int64
+	// CheckUserConn is called once per request, after the route is resolved and
+	// before the request is proxied. A non nil error rejects the request with
+	// 403. It lets the caller apply an allow/deny policy on the client address.
+	CheckUserConn func(proxyName, remoteAddr string) error
 }
 
 type HTTPReverseProxy struct {
@@ -44,6 +48,7 @@ type HTTPReverseProxy struct {
 	vhostRouter *Routers
 
 	responseHeaderTimeout time.Duration
+	checkUserConn         func(proxyName, remoteAddr string) error
 }
 
 func NewHTTPReverseProxy(option HTTPReverseProxyOptions, vhostRouter *Routers) *HTTPReverseProxy {
@@ -53,6 +58,7 @@ func NewHTTPReverseProxy(option HTTPReverseProxyOptions, vhostRouter *Routers) *
 	rp := &HTTPReverseProxy{
 		responseHeaderTimeout: time.Duration(option.ResponseHeaderTimeoutS) * time.Second,
 		vhostRouter:           vhostRouter,
+		checkUserConn:         option.CheckUserConn,
 	}
 	proxy := &httputil.ReverseProxy{
 		// Modify incoming requests by route policies.
@@ -297,6 +303,16 @@ func (rp *HTTPReverseProxy) ServeHTTP(rw http.ResponseWriter, req *http.Request)
 			http.Error(rw, http.StatusText(http.StatusUnauthorized), http.StatusUnauthorized)
 		}
 		return
+	}
+
+	// The client address is checked before anything is sent upstream, the same
+	// way a tcp proxy rejects a connection.
+	if rp.checkUserConn != nil && rc != nil {
+		if err := rp.checkUserConn(rc.ProxyName, req.RemoteAddr); err != nil {
+			log.Debugf("http request from [%s] to proxy [%s] was rejected: %v", req.RemoteAddr, rc.ProxyName, err)
+			http.Error(rw, http.StatusText(http.StatusForbidden), http.StatusForbidden)
+			return
+		}
 	}
 
 	if req.Method == http.MethodConnect {

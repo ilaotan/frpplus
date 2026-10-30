@@ -287,6 +287,19 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 	if cfg.VhostHTTPPort > 0 {
 		rp := vhost.NewHTTPReverseProxy(vhost.HTTPReverseProxyOptions{
 			ResponseHeaderTimeoutS: cfg.VhostHTTPTimeout,
+			// The controller is created later in the startup sequence, so the
+			// lookup happens per request instead of being captured here.
+			CheckUserConn: func(proxyName, remoteAddr string) error {
+				ctl := svr.rc.IPAccessController
+				if ctl == nil {
+					return nil
+				}
+				decision := ctl.Check(string(v1.ProxyTypeHTTP), proxyName, remoteAddr)
+				if decision.Allowed {
+					return nil
+				}
+				return errors.New(decision.Reason)
+			},
 		}, svr.httpVhostRouter)
 		svr.rc.HTTPReverseProxy = rp
 
