@@ -180,11 +180,12 @@ curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/records?resul
 curl -s -u admin:admin123 -X POST http://127.0.0.1:17500/api/v2/ip-access/prune
 ```
 
-**当前请求方 IP / 一键放行（`hours:0` 永久）**
+**当前请求方 IP / 一键放行（`hours:0` 表示永久）**
 
 ```bash
 curl -s -u admin:admin123 http://127.0.0.1:17500/api/v2/ip-access/current-ip
 curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"hours":24}' http://127.0.0.1:17500/api/v2/ip-access/allow-current-ip
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"hours":0}' http://127.0.0.1:17500/api/v2/ip-access/allow-current-ip
 ```
 
 > cmd / 那个 Windows 终端里 `-d '...'` 要改成转义写法 `-d "{\"globalMode\":\"allowlist\"}"`，其余不变；
@@ -283,6 +284,32 @@ curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?ho
 | 来源是回环地址且没传 `ip` 时返回 400 | 说明请求经过了本机反向代理，加 `127.0.0.1` 没有意义；传了 `ip` 就不受这条限制 |
 | 开关默认关闭 | 升级不会凭空多出一个入口 |
 | `hours` 上限 720 | 避免一次调用把有效期设到天荒地老 |
+
+### 7.5 想加永久规则
+
+`self-allow` 只接受 1~720 小时（它是给"IP 老变"的场景用的，永久没意义）。要永久，用下面两个接口：
+
+```bash
+# 1) 任意 IP，永久：响应里没有 expiresAt 字段就是永久
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" \
+     -d '{"proxyName":"*","action":"allow","ip":"203.0.113.7","note":"permanent"}' \
+     http://127.0.0.1:17500/api/v2/ip-access/rules
+
+# 2) 只放行"调用方自己"，并且永久
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" \
+     -d '{"hours":0}' \
+     http://127.0.0.1:17500/api/v2/ip-access/allow-current-ip
+```
+
+两个接口的关系：
+
+| 想做的事 | 用哪个 |
+|---|---|
+| 给任意 IP 加永久规则 | `POST /rules`（`proxyName` 用 `*` 表示全局，可用 CIDR） |
+| 给自己当前这个地址加永久规则 | `POST /allow-current-ip`，`hours:0` |
+| 给任意 IP 加临时规则（≤30 天） | `GET/POST /self-allow`，`hours` 1~720 |
+
+一个容易困惑的点：如果这个 IP 已经有一条永久规则，再调 `self-allow?hours=12` **不会**把它降级成 12 小时——命中永久规则时原样返回，响应里 `expiresAt` 是 `0`。
 
 ## 8. Dashboard
 
