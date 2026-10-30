@@ -357,14 +357,33 @@ func (c *Controller) APIV2IPAccessAllowCurrentIP(ctx *httppkg.Context) (any, err
 	}, nil
 }
 
+// parseSelfAllowHours resolves the validity of a self-allow call. The query
+// parameter wins, a POST may carry it in the body as well, otherwise the
+// configured default applies.
 func parseSelfAllowHours(ctx *httppkg.Context, defaultHours int64) (int64, error) {
-	raw := strings.TrimSpace(ctx.Query("hours"))
-	if raw == "" {
-		return defaultHours, nil
+	hours := defaultHours
+	invalid := httppkg.NewError(http.StatusBadRequest, "hours must be a positive integer, 720 is the maximum")
+
+	if ctx.Req.Method == http.MethodPost {
+		// A pointer tells "hours absent" apart from an explicit 0, which is not
+		// accepted here: a permanent rule is only reachable through
+		// allow-current-ip.
+		var req struct {
+			Hours *int64 `json:"hours"`
+		}
+		if err := ctx.BindJSON(&req); err == nil && req.Hours != nil {
+			if *req.Hours <= 0 {
+				return 0, invalid
+			}
+			hours = *req.Hours
+		}
 	}
-	hours, err := strconv.ParseInt(raw, 10, 64)
-	if err != nil || hours <= 0 {
-		return 0, httppkg.NewError(http.StatusBadRequest, "hours must be a positive integer")
+	if raw := strings.TrimSpace(ctx.Query("hours")); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v <= 0 {
+			return 0, invalid
+		}
+		hours = v
 	}
 	if hours > selfAllowMaxHours {
 		hours = selfAllowMaxHours
@@ -411,5 +430,6 @@ func buildIPAccessSettingsResp(s ipaccess.Settings) model.V2IPAccessSettingsResp
 		RetentionHours: s.RetentionHours,
 		MaxRecords:     s.MaxRecords,
 		ProxyModes:     proxyModes,
+		Types:          s.Types,
 	}
 }

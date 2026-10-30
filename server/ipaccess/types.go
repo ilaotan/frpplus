@@ -104,6 +104,8 @@ type Settings struct {
 	RecordCount    int
 	// ProxyModes holds the proxies that override the global mode.
 	ProxyModes map[string]string
+	// Types holds the proxy types the check applies to.
+	Types []string
 }
 
 // snapshot is the on-disk representation of the store.

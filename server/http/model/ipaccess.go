@@ -26,6 +26,8 @@ type V2IPAccessSettingsResp struct {
 	MaxRecords     int64 `json:"maxRecords"`
 	// ProxyModes holds the proxies that override the global mode.
 	ProxyModes []V2IPAccessProxyModeResp `json:"proxyModes"`
+	// Types holds the proxy types the check applies to.
+	Types []string `json:"types"`
 }
 
 type V2IPAccessProxyModeResp struct {

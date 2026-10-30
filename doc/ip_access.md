@@ -102,61 +102,243 @@ selfAllowHours = 24
 
 ## 6. 管理接口
 
-全部返回 `{"code":200,"msg":"success","data":...}`，鉴权沿用 Dashboard 的 Basic Auth。
+### 6.1 通用约定
+
+- **鉴权**：Dashboard 的 Basic Auth（`webServer.user` / `webServer.password`），没有额外的 token；
+- **编码**：请求与响应都是 UTF-8 JSON，写操作必须带 `Content-Type: application/json`；
+- **返回**：`{"code":200,"msg":"success","data":...}`；失败时 `code` 是 HTTP 状态码，`msg` 是原因；
+- **地址**：示例用 `http://192.168.1.10:7500`，换成你 frps 的实际地址。
+
+先设两个变量，后面所有命令直接复用：
+
+```bash
+BASE=http://192.168.1.10:7500/api/v2/ip-access
+AUTH=admin:your-password          # = webServer.user:webServer.password
+```
+
+Windows 上两个必踩的坑：
+
+```bat
+:: 1) cmd 里没有 curl，Windows 10/11 自带 curl.exe，直接写 curl 即可
+:: 2) 机器上设了 http_proxy 时，本地请求要加 --noproxy "*"，否则会被送去代理
+
+curl.exe -s --noproxy "*" -u admin:your-password http://192.168.1.10:7500/api/v2/ip-access/settings
+```
+
+> 在 Windows 的终端里如果 `curl` 报"找不到参数"或返回 `Invoke-WebRequest` 的对象，说明用的是那个同名别名，写 `curl.exe` 就对了。
+
+`-u` 只是把凭证编码成 `Authorization: Basic base64(user:pass)`，等价的手写请求头：
+
+```bash
+# base64('admin:your-password') = YWRtaW46eW91ci1wYXNzd29yZA==
+curl -s -H "Authorization: Basic YWRtaW46eW91ci1wYXNzd29yZA==" \
+     -H "Accept: application/json" \
+     "$BASE/settings"
+```
+
+### 6.2 接口清单
 
 | 方法 | 路径 | 说明 |
 |---|---|---|
-| GET | `/api/v2/ip-access/settings` | 全局模式、规则数、记录数、保留策略 |
-| PUT | `/api/v2/ip-access/settings` | `{"globalMode":"allowlist"}` |
-| PUT | `/api/v2/ip-access/proxy-modes` | `{"proxyName":"web","mode":"denylist"}`，`mode:""` 表示继承 |
-| GET | `/api/v2/ip-access/rules` | 支持 `proxyName` / `action` / `page` / `pageSize` |
-| POST | `/api/v2/ip-access/rules` | `{"proxyName":"*","action":"allow","ip":"1.2.3.4","note":"..."}` |
-| DELETE | `/api/v2/ip-access/rules/{id}` | 删除一条规则 |
-| GET | `/api/v2/ip-access/records` | 支持 `proxyName` / `ip` / `result=allowed\|denied` / 分页 |
-| POST | `/api/v2/ip-access/records/delete` | `{"ids":[1,2]}` |
-| POST | `/api/v2/ip-access/prune` | 立即清理过期规则和记录 |
-| GET/POST | `/api/v2/ip-access/self-allow` | 自助加白，见下一节 |
-| GET | `/api/v2/ip-access/current-ip` | 回显"页面请求来自哪个 IP"，`{"ip":"1.2.3.4","loopback":false}` |
-| POST | `/api/v2/ip-access/allow-current-ip` | 把当前访问者的 IP 加进全局 allow，`{"hours":0}`，`0` 表示永久 |
+| GET | `/settings` | 全局模式、规则数、记录数、保留策略、生效的代理类型 |
+| PUT | `/settings` | 切全局模式 |
+| PUT | `/proxy-modes` | 单代理模式覆盖，`mode:""` 表示继承全局 |
+| GET | `/rules` | 规则列表，支持 `proxyName` / `action` / `page` / `pageSize` |
+| POST | `/rules` | 新增规则 |
+| DELETE | `/rules/{id}` | 删除规则 |
+| GET | `/records` | 访问记录，支持 `proxyName` / `ip` / `result=allowed\|denied` / 分页 |
+| POST | `/records/delete` | 按 id 批量删除记录 |
+| POST | `/prune` | 立即清理过期规则与记录 |
+| GET/POST | `/self-allow` | 自助加白，见第 7 节 |
+| GET | `/current-ip` | 回显请求方地址与是否回环 |
+| POST | `/allow-current-ip` | 把当前请求方 IP 加进全局 allow，`hours:0` 为永久 |
 
-`proxyName` 为 `*` 表示全局规则。
+### 6.3 curl 示例
+
+**查看设置**
+
+```bash
+curl -s -u "$AUTH" "$BASE/settings"
+```
+
+```json
+{"code":200,"msg":"success","data":{
+  "enabled":true,"storePath":"/var/lib/frp/ipaccess.json","globalMode":"allowlist",
+  "ruleCount":2,"recordCount":18,"retentionHours":168,"maxRecords":5000,
+  "proxyModes":[],"types":["tcp"]}}
+```
+
+**切换全局模式**
+
+```bash
+curl -s -u "$AUTH" -X PUT -H "Content-Type: application/json" \
+     -d '{"globalMode":"allowlist"}' "$BASE/settings"
+```
+
+**设置 / 取消单个代理的模式**（`mode` 传空串表示回到继承全局）
+
+```bash
+curl -s -u "$AUTH" -X PUT -H "Content-Type: application/json" \
+     -d '{"proxyName":"web","mode":"denylist"}' "$BASE/proxy-modes"
+
+curl -s -u "$AUTH" -X PUT -H "Content-Type: application/json" \
+     -d '{"proxyName":"web","mode":""}' "$BASE/proxy-modes"
+```
+
+**新增规则**（`proxyName` 用 `*` 表示全局，`ip` 可以是单地址或 CIDR）
+
+```bash
+curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
+     -d '{"proxyName":"*","action":"allow","ip":"203.0.113.7","note":"office"}' \
+     "$BASE/rules"
+```
+
+```json
+{"code":200,"msg":"success","data":{"id":7,"proxyName":"*","action":"allow",
+ "ip":"203.0.113.7","note":"office","createdAt":1793363639,"source":"manual"}}
+```
+
+**查规则 / 删规则**
+
+```bash
+curl -s -u "$AUTH" "$BASE/rules?page=1&pageSize=50"
+curl -s -u "$AUTH" "$BASE/rules?action=deny"
+curl -s -u "$AUTH" -X DELETE "$BASE/rules/7"
+```
+
+**查访问记录**（`result` 取 `allowed` / `denied`）
+
+```bash
+curl -s -u "$AUTH" "$BASE/records?page=1&pageSize=50"
+curl -s -u "$AUTH" "$BASE/records?result=denied&ip=203.0.113.7"
+```
+
+**删记录 / 立即清理**
+
+```bash
+curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
+     -d '{"ids":[3,4]}' "$BASE/records/delete"
+
+curl -s -u "$AUTH" -X POST "$BASE/prune"
+```
+
+```json
+{"code":200,"msg":"success","data":{"cleared":2,"total":16}}
+```
+
+**当前请求方 IP**（只读，不产生规则）
+
+```bash
+curl -s -u "$AUTH" "$BASE/current-ip"
+```
+
+```json
+{"code":200,"msg":"success","data":{"ip":"203.0.113.7","loopback":false}}
+```
+
+**一键放行当前 IP**（`hours:0` 表示永久；允许回环地址）
+
+```bash
+curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
+     -d '{"hours":24}' "$BASE/allow-current-ip"
+
+curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
+     -d '{"hours":0}' "$BASE/allow-current-ip"
+```
 
 ## 7. 自助加白（IP 会变的场景）
 
 手机流量、动态宽带这类公网 IP 经常变的场景，每次改了 IP 都去页面加一条太麻烦。
-开启后可以"敲门"式加白：
+开启后可以"敲门"式加白——**接口只把调用方自己的地址加进全局 allow，不接受传入 IP**。
 
-```
-GET  /api/v2/ip-access/self-allow?hours=12     # 手机浏览器存成书签，打开即完成
-POST /api/v2/ip-access/self-allow              # 脚本定时调用
+前提：配置里 `enableSelfAllow = true`，且 `webServer.user` / `webServer.password` 都不为空。
+
+### 7.1 GET：手机书签式
+
+```bash
+curl -s -u "$AUTH" "$BASE/self-allow?hours=12"
 ```
 
-返回：
+不传 `hours` 就用配置的 `selfAllowHours`（默认 24）。存成手机浏览器书签时，把凭证放进 URL
+（浏览器会提示一次并记住），打开即完成加白，无需输入任何命令。
+
+### 7.2 POST：脚本定时调用
+
+`hours` 放 body 或 query 都可以，**query 优先**：
+
+```bash
+# body
+curl -s -u "$AUTH" -X POST -H "Content-Type: application/json" \
+     -d '{"hours":12}' "$BASE/self-allow"
+
+# query
+curl -s -u "$AUTH" -X POST "$BASE/self-allow?hours=12"
+
+# 都不带 → 用配置里的 selfAllowHours
+curl -s -u "$AUTH" -X POST "$BASE/self-allow"
+```
+
+手写请求头（放进脚本或其它语言里更直观）：
+
+```bash
+curl -s -X POST \
+     -H "Authorization: Basic YWRtaW46eW91ci1wYXNzd29yZA==" \
+     -H "Content-Type: application/json" \
+     -H "Accept: application/json" \
+     -d '{"hours":12}' \
+     "http://192.168.1.10:7500/api/v2/ip-access/self-allow"
+```
+
+### 7.3 返回与含义
 
 ```json
-{"code":200,"msg":"success","data":{"ip":"1.2.3.4","proxyName":"*","action":"allow","ruleId":12,"expiresAt":1793363639}}
+{"code":200,"msg":"success","data":{
+  "ip":"203.0.113.7","proxyName":"*","action":"allow",
+  "ruleId":12,"expiresAt":1793407239}}
 ```
 
-行为约定：
+- `ip`：**服务端看到的来源地址**，不是你传的（你也没法传）；
+- `ruleId`：落在哪条规则上，重复调用不变；
+- `expiresAt`：unix 秒；`0` 表示永久（只有 `allow-current-ip` 能产生永久规则）。
+
+连续调用只续期、不新增行：
+
+```bash
+curl -s -u "$AUTH" "$BASE/self-allow?hours=1"     # ruleId 12, expiresAt = now+1h
+curl -s -u "$AUTH" "$BASE/self-allow?hours=24"    # 仍 ruleId 12, expiresAt = now+24h
+curl -s -u "$AUTH" "$BASE/self-allow?hours=1"     # 已有有效期更长，原样返回，不变
+```
+
+### 7.4 行为约定
 
 - **只加全局 allow 规则**，不支持指定代理；
 - **IP 不由调用方提供**，一律取 TCP 连接的来源地址；
 - **幂等**：同一 IP 反复调用只保留一条规则，`ruleId` 不变；已有有效期更长时不会被缩短，
   间隔足够时按新的 `hours` 顺延（适合定时器）；
-- 有效期默认取 `selfAllowHours`，可用 `?hours=N` 覆盖，上限 **720 小时（30 天）**；
+- 有效期默认取 `selfAllowHours`，可用 `hours` 覆盖，上限 **720 小时（30 天）**；
 - 到期后规则自动失效并被清理。
+
+定时调用建议：**间隔 ≤ hours / 2**，例如 `hours=12` 就每 5~10 分钟调一次。
+
+### 7.5 常见错误
+
+| HTTP | msg 关键字 | 原因与处理 |
+|---|---|---|
+| 401 | `Unauthorized` | 账号密码错，或忘了 `-u` |
+| 403 | `self allow requires webServer.user and webServer.password to be set` | Dashboard 没设密码。frp 的 Basic Auth 在账号密码都为空时是**全放行**的，所以这里显式拒绝 |
+| 400 | `self allow is not enabled` | 配置里 `enableSelfAllow = false`，改完重启 frps |
+| 400 | `the request comes from 127.0.0.1` | 请求经过了本机反向代理，取到回环地址；直连 frps 再调 |
+| 400 | `hours must be a positive integer, 720 is the maximum` | `hours` 传了 0、负数或非数字（要永久请用 `allow-current-ip`） |
+| 404 | `page not found` | 二进制太旧，不含这个接口，用新版本重编 |
 
 安全设计（都是故意的）：
 
 | 措施 | 原因 |
 |---|---|
 | 必须配置了 `webServer.user` / `webServer.password`，否则返回 403 | frp 的 Basic Auth 中间件在账号密码都为空时是**全放行**的 |
-| 来源是回环地址时返回 400 | 说明请求经过了本机反向代理，加 `127.0.0.1` 没有意义，直接报错而不是静默加一条废规则 |
+| 来源是回环地址时返回 400 | 说明请求经过了本机反向代理，加 `127.0.0.1` 没有意义，直接报错而不是静默加一条无效规则 |
 | 开关默认关闭 | 升级不会凭空多出一个入口 |
 | `hours` 上限 720 | 避免一次调用把有效期设到天荒地老 |
-
-定时调用建议：**间隔 ≤ hours / 2**。例如 `hours=12` 就每 5~10 分钟调一次，
-IP 变了之后最多一个间隔即可恢复，且不会产生无意义的请求。
 
 ## 8. Dashboard
 

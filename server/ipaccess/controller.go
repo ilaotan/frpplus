@@ -101,13 +101,21 @@ func New(cfg v1.IPAccessControlConfig) (*Controller, error) {
 	return c, nil
 }
 
-// Types returns the proxy types that are subject to the check.
+// Types returns the proxy types that are subject to the check, in the order
+// used by the configuration so that the dashboard always reads the same.
 func (c *Controller) Types() []string {
-	types := make([]string, 0, len(c.types))
-	for t := range c.types {
-		types = append(types, t)
+	order := []string{
+		string(v1.ProxyTypeTCP),
+		string(v1.ProxyTypeHTTP),
+		string(v1.ProxyTypeHTTPS),
+		string(v1.ProxyTypeTCPMUX),
 	}
-	slices.Sort(types)
+	types := make([]string, 0, len(c.types))
+	for _, t := range order {
+		if _, ok := c.types[t]; ok {
+			types = append(types, t)
+		}
+	}
 	return types
 }
 
@@ -264,6 +272,7 @@ func (c *Controller) Settings() Settings {
 		ProxyModes:     map[string]string{},
 	}
 	maps.Copy(s.ProxyModes, c.proxyModes)
+	s.Types = c.Types()
 	c.ruleMu.RUnlock()
 
 	c.recordMu.Lock()
