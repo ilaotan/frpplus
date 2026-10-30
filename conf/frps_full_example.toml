@@ -6,21 +6,8 @@
 bindAddr = "0.0.0.0"
 bindPort = 7000
 
-# udp port used for kcp protocol, it can be same with 'bindPort'.
-# if not set, kcp is disabled in frps.
-kcpBindPort = 7000
-
-# udp port used for quic protocol.
-# if not set, quic is disabled in frps.
-# quicBindPort = 7002
-
 # Specify which address proxy will listen for, default value is same with bindAddr
 # proxyBindAddr = "127.0.0.1"
-
-# quic protocol options
-# transport.quic.keepalivePeriod = 10
-# transport.quic.maxIdleTimeout = 30
-# transport.quic.maxIncomingStreams = 100000
 
 # Heartbeat configure, it's not recommended to modify the default value
 # The default value of heartbeatTimeout is 90. Set negative value to disable it.
@@ -47,23 +34,6 @@ transport.tls.force = false
 # transport.tls.keyFile = "server.key"
 # transport.tls.trustedCaFile = "ca.crt"
 
-# If you want to support virtual host, you must set the http port for listening (optional)
-# Note: http port and https port can be same with bindPort
-vhostHTTPPort = 80
-vhostHTTPSPort = 443
-
-# Response header timeout(seconds) for vhost http server, default is 60s
-# vhostHTTPTimeout = 60
-
-# tcpmuxHTTPConnectPort specifies the port that the server listens for TCP
-# HTTP CONNECT requests. If the value is 0, the server will not multiplex TCP
-# requests on one single port. If it's not - it will listen on this value for
-# HTTP CONNECT requests. By default, this value is 0.
-# tcpmuxHTTPConnectPort = 1337
-
-# If tcpmuxPassthrough is true, frps won't do any update on traffic.
-# tcpmuxPassthrough = false
-
 # Configure the web server to enable the dashboard for frps.
 # dashboard is available only if webServer.port is set.
 webServer.addr = "127.0.0.1"
@@ -75,26 +45,9 @@ webServer.password = "admin"
 # dashboard assets directory(only for debug mode)
 # webServer.assetsDir = "./static"
 
-# Deprecated: use metricsServer.pprofEnable for authenticated profiling.
 # Enable golang pprof handlers in dashboard listener.
 # Dashboard port must be set first
 webServer.pprofEnable = false
-
-# Deprecated: enablePrometheus exports /metrics on webServer only.
-# Use metricsServer.port instead; it enables business metrics automatically.
-enablePrometheus = true
-
-# Separate health, Prometheus metrics, and optional profiling listener.
-# Port 0 disables it. The default address only accepts local connections.
-metricsServer.addr = "127.0.0.1"
-metricsServer.port = 0
-# Credentials and TLS are independent of webServer; /healthz stays anonymous.
-# metricsServer.user = "monitor"
-# metricsServer.password = "change-me"
-# metricsServer.tls.certFile = "metrics.crt"
-# metricsServer.tls.keyFile = "metrics.key"
-# Profiling requires explicit opt-in, uses the above credentials, and excludes cmdline.
-metricsServer.pprofEnable = false
 
 # console or real logFile path like ./frps.log
 log.to = "./frps.log"
@@ -108,8 +61,7 @@ log.disablePrintColor = false
 detailedErrorsToClient = true
 
 # auth.method specifies what authentication method to use authenticate frpc with frps.
-# If "token" is specified - token will be read into login message.
-# If "oidc" is specified - OIDC (Open ID Connect) token will be issued using OIDC settings. By default, this value is "token".
+# Only "token" is supported. By default, this value is "token".
 auth.method = "token"
 
 # auth.additionalScopes specifies additional scopes to include authentication information.
@@ -124,15 +76,6 @@ auth.token = "12345678"
 # auth.tokenSource.type = "file"
 # auth.tokenSource.file.path = "/etc/frp/token"
 
-# oidc issuer specifies the issuer to verify OIDC tokens with.
-auth.oidc.issuer = ""
-# oidc audience specifies the audience OIDC tokens should contain when validated.
-auth.oidc.audience = ""
-# oidc skipExpiryCheck specifies whether to skip checking if the OIDC token is expired.
-auth.oidc.skipExpiryCheck = false
-# oidc skipIssuerCheck specifies whether to skip checking if the OIDC token's issuer claim matches the issuer specified in OidcIssuer.
-auth.oidc.skipIssuerCheck = false
-
 # userConnTimeout specifies the maximum time to wait for a work connection.
 # userConnTimeout = 10
 
@@ -146,41 +89,6 @@ allowPorts = [
 
 # Max ports can be used for each client, default value is 0 means no limit
 maxPortsPerClient = 0
-
-# If subDomainHost is not empty, you can set subdomain when type is http or https in frpc's configure file
-# When subdomain is test, the host used by routing is test.frps.com
-subDomainHost = "frps.com"
-
-# custom 404 page for HTTP requests
-# custom404Page = "/path/to/404.html"
-
-# specify udp packet size, unit is byte. If not set, the default value is 1500.
-# This parameter should be same between client and server.
-# It affects the udp and sudp proxy.
-udpPacketSize = 1500
-
-# Retention time for NAT hole punching strategy data.
-natholeAnalysisDataReserveHours = 168
-
-# ssh tunnel gateway
-# If you want to enable this feature, the bindPort parameter is required, while others are optional.
-# By default, this feature is disabled. It will be enabled if bindPort is greater than 0.
-# sshTunnelGateway.bindPort = 2200
-# sshTunnelGateway.privateKeyFile = "/home/frp-user/.ssh/id_rsa"
-# sshTunnelGateway.autoGenPrivateKeyPath = ""
-# sshTunnelGateway.authorizedKeysFile = "/home/frp-user/.ssh/authorized_keys"
-
-[[httpPlugins]]
-name = "user-manager"
-addr = "127.0.0.1:9000"
-path = "/handler"
-ops = ["Login"]
-
-[[httpPlugins]]
-name = "port-manager"
-addr = "127.0.0.1:9001"
-path = "/handler"
-ops = ["NewProxy"]
 
 # ip access control for tcp proxies
 # The real client ip of a tcp proxy connection is only known by the server,
@@ -209,8 +117,6 @@ enableSelfAllow = false
 # Default validity in hours of an ip added by the self-allow api, it can be
 # overridden per request with the hours query parameter (max 720).
 selfAllowHours = 24
-# Proxy types the check applies to: tcp, http, https, tcpmux. Visitor based
-# proxies (stcp, xtcp, sudp) are not supported, on the server side they only
-# see the address of the visitor.
+# Proxy types the check applies to, only "tcp" is supported.
 types = ["tcp"]
 

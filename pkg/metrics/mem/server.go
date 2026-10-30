@@ -35,6 +35,9 @@ var (
 func init() {
 	ServerMetrics = sm
 	StatsCollector = sm
+	// The dashboard API is the only reader of these statistics, so they are
+	// always collected.
+	server.Register(sm)
 	sm.run()
 }
 

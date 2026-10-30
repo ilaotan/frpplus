@@ -1,0 +1,44 @@
+# frps.toml — TCP 代理 + TLS 双向认证（推荐给公网/不可信网络）
+#
+# 这套配置实现的链路是：
+#   用户 ──明文 TCP──> frps:6001 ══TLS 隧道══> frpc ──明文 TCP──> 127.0.0.1:22
+# 也就是说 TLS 只保护 "frpc ↔ frps" 这一段（控制连接 + 数据连接），
+# 用户在 6001 端口上的连接仍是裸 TCP，不会因为这里开了 TLS 就变成 TLS 服务。
+#
+# 证书：本文件默认按"有自己的 CA + 服务端证书"来写。
+# 如果 certFile/keyFile 留空，frps 会在启动时随机生成一张自签证书（仅加密，重启即变），
+# 此时 frpc 无法固定信任它，只能跳过校验——见文件末尾的"零证书模式"。
+
+bindAddr = "0.0.0.0"
+bindPort = 7000
+
+# 只接受 TLS 连接。没有这项时，老客户端仍可明文连 7000 端口。
+transport.tls.force = true
+
+# 服务端证书与私钥（放到 frps 工作目录下的 certs/ 里，相对路径以启动目录为准）
+transport.tls.certFile = "./certs/server.crt"
+transport.tls.keyFile = "./certs/server.key"
+
+# 一旦配置了 trustedCaFile，frps 会要求 frpc 出示客户端证书并用这个 CA 校验
+# （mTLS，双向认证）。frpc 不带证书或证书不是这个 CA 签的，握手直接失败。
+transport.tls.trustedCaFile = "./certs/ca.crt"
+
+# TLS 不替代身份认证，token 仍然要配。
+auth.method = "token"
+auth.token = "change-me-please"
+
+# 面板：建议只监听回环，或加防火墙，不要直接暴露公网。
+webServer.addr = "127.0.0.1"
+webServer.port = 7500
+webServer.user = "admin"
+webServer.password = "change-me"
+
+log.to = "console"
+log.level = "info"
+
+# ---------------------------------------------------------------------------
+# 零证书模式（只想加密、不想管证书时用）：把上面三行 transport.tls.* 证书配置
+# 全部注释掉，并去掉 force 之外的其他改动即可。frps 会自动生成自签证书。
+# 此时 frpc 侧不配 trustedCaFile，Go 的 InsecureSkipVerify = true：
+# 流量是加密的，但不验证对端身份，挡不住中间人。
+# ---------------------------------------------------------------------------

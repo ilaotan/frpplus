@@ -61,10 +61,6 @@ type ProxyBackend struct {
 	LocalIP string `json:"localIP,omitempty"`
 	// LocalPort specifies the port of the backend.
 	LocalPort int `json:"localPort,omitempty"`
-
-	// Plugin specifies what plugin should be used for handling connections. If this value
-	// is set, the LocalIP and LocalPort values will be ignored.
-	Plugin TypedClientPluginOptions `json:"plugin,omitempty"`
 }
 
 // HealthCheckConfig configures health checking. This can be useful for load
@@ -105,17 +101,6 @@ func (c HealthCheckConfig) Clone() HealthCheckConfig {
 	return out
 }
 
-type DomainConfig struct {
-	CustomDomains []string `json:"customDomains,omitempty"`
-	SubDomain     string   `json:"subdomain,omitempty"`
-}
-
-func (c DomainConfig) Clone() DomainConfig {
-	out := c
-	out.CustomDomains = slices.Clone(c.CustomDomains)
-	return out
-}
-
 type ProxyBaseConfig struct {
 	Name string `json:"name"`
 	Type string `json:"type"`
@@ -137,13 +122,6 @@ func (c ProxyBaseConfig) Clone() ProxyBaseConfig {
 	out.Annotations = maps.Clone(c.Annotations)
 	out.Metadatas = maps.Clone(c.Metadatas)
 	out.HealthCheck = c.HealthCheck.Clone()
-	out.ProxyBackend = c.ProxyBackend.Clone()
-	return out
-}
-
-func (c ProxyBackend) Clone() ProxyBackend {
-	out := c
-	out.Plugin = c.Plugin.Clone()
 	return out
 }
 
@@ -154,10 +132,6 @@ func (c *ProxyBaseConfig) GetBaseConfig() *ProxyBaseConfig {
 func (c *ProxyBaseConfig) Complete() {
 	c.LocalIP = util.EmptyOr(c.LocalIP, "127.0.0.1")
 	c.Transport.BandwidthLimitMode = util.EmptyOr(c.Transport.BandwidthLimitMode, types.BandwidthLimitModeClient)
-
-	if c.Plugin.ClientPluginOptions != nil {
-		c.Plugin.Complete()
-	}
 }
 
 func (c *ProxyBaseConfig) MarshalToMsg(m *msg.NewProxy) {
@@ -228,25 +202,11 @@ type ProxyConfigurer interface {
 type ProxyType string
 
 const (
-	ProxyTypeTCP    ProxyType = "tcp"
-	ProxyTypeUDP    ProxyType = "udp"
-	ProxyTypeTCPMUX ProxyType = "tcpmux"
-	ProxyTypeHTTP   ProxyType = "http"
-	ProxyTypeHTTPS  ProxyType = "https"
-	ProxyTypeSTCP   ProxyType = "stcp"
-	ProxyTypeXTCP   ProxyType = "xtcp"
-	ProxyTypeSUDP   ProxyType = "sudp"
+	ProxyTypeTCP ProxyType = "tcp"
 )
 
 var proxyConfigTypeMap = map[ProxyType]reflect.Type{
-	ProxyTypeTCP:    reflect.TypeFor[TCPProxyConfig](),
-	ProxyTypeUDP:    reflect.TypeFor[UDPProxyConfig](),
-	ProxyTypeHTTP:   reflect.TypeFor[HTTPProxyConfig](),
-	ProxyTypeHTTPS:  reflect.TypeFor[HTTPSProxyConfig](),
-	ProxyTypeTCPMUX: reflect.TypeFor[TCPMuxProxyConfig](),
-	ProxyTypeSTCP:   reflect.TypeFor[STCPProxyConfig](),
-	ProxyTypeXTCP:   reflect.TypeFor[XTCPProxyConfig](),
-	ProxyTypeSUDP:   reflect.TypeFor[SUDPProxyConfig](),
+	ProxyTypeTCP: reflect.TypeFor[TCPProxyConfig](),
 }
 
 func NewProxyConfigurerByType(proxyType ProxyType) ProxyConfigurer {
@@ -282,253 +242,5 @@ func (c *TCPProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
 func (c *TCPProxyConfig) Clone() ProxyConfigurer {
 	out := *c
 	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	return &out
-}
-
-var _ ProxyConfigurer = &UDPProxyConfig{}
-
-type UDPProxyConfig struct {
-	ProxyBaseConfig
-
-	RemotePort int `json:"remotePort,omitempty"`
-}
-
-func (c *UDPProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.RemotePort = c.RemotePort
-}
-
-func (c *UDPProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.RemotePort = m.RemotePort
-}
-
-func (c *UDPProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	return &out
-}
-
-var _ ProxyConfigurer = &HTTPProxyConfig{}
-
-type HTTPProxyConfig struct {
-	ProxyBaseConfig
-	DomainConfig
-
-	Locations         []string         `json:"locations,omitempty"`
-	HTTPUser          string           `json:"httpUser,omitempty"`
-	HTTPPassword      string           `json:"httpPassword,omitempty"`
-	HostHeaderRewrite string           `json:"hostHeaderRewrite,omitempty"`
-	RequestHeaders    HeaderOperations `json:"requestHeaders,omitempty"`
-	ResponseHeaders   HeaderOperations `json:"responseHeaders,omitempty"`
-	RouteByHTTPUser   string           `json:"routeByHTTPUser,omitempty"`
-}
-
-func (c *HTTPProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.CustomDomains = c.CustomDomains
-	m.SubDomain = c.SubDomain
-	m.Locations = c.Locations
-	m.HostHeaderRewrite = c.HostHeaderRewrite
-	m.HTTPUser = c.HTTPUser
-	m.HTTPPwd = c.HTTPPassword
-	m.Headers = c.RequestHeaders.Set
-	m.ResponseHeaders = c.ResponseHeaders.Set
-	m.RouteByHTTPUser = c.RouteByHTTPUser
-}
-
-func (c *HTTPProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.CustomDomains = m.CustomDomains
-	c.SubDomain = m.SubDomain
-	c.Locations = m.Locations
-	c.HostHeaderRewrite = m.HostHeaderRewrite
-	c.HTTPUser = m.HTTPUser
-	c.HTTPPassword = m.HTTPPwd
-	c.RequestHeaders.Set = m.Headers
-	c.ResponseHeaders.Set = m.ResponseHeaders
-	c.RouteByHTTPUser = m.RouteByHTTPUser
-}
-
-func (c *HTTPProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	out.DomainConfig = c.DomainConfig.Clone()
-	out.Locations = slices.Clone(c.Locations)
-	out.RequestHeaders = c.RequestHeaders.Clone()
-	out.ResponseHeaders = c.ResponseHeaders.Clone()
-	return &out
-}
-
-var _ ProxyConfigurer = &HTTPSProxyConfig{}
-
-type HTTPSProxyConfig struct {
-	ProxyBaseConfig
-	DomainConfig
-}
-
-func (c *HTTPSProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.CustomDomains = c.CustomDomains
-	m.SubDomain = c.SubDomain
-}
-
-func (c *HTTPSProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.CustomDomains = m.CustomDomains
-	c.SubDomain = m.SubDomain
-}
-
-func (c *HTTPSProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	out.DomainConfig = c.DomainConfig.Clone()
-	return &out
-}
-
-type TCPMultiplexerType string
-
-const (
-	TCPMultiplexerHTTPConnect TCPMultiplexerType = "httpconnect"
-)
-
-var _ ProxyConfigurer = &TCPMuxProxyConfig{}
-
-type TCPMuxProxyConfig struct {
-	ProxyBaseConfig
-	DomainConfig
-
-	HTTPUser        string `json:"httpUser,omitempty"`
-	HTTPPassword    string `json:"httpPassword,omitempty"`
-	RouteByHTTPUser string `json:"routeByHTTPUser,omitempty"`
-	Multiplexer     string `json:"multiplexer,omitempty"`
-}
-
-func (c *TCPMuxProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.CustomDomains = c.CustomDomains
-	m.SubDomain = c.SubDomain
-	m.Multiplexer = c.Multiplexer
-	m.HTTPUser = c.HTTPUser
-	m.HTTPPwd = c.HTTPPassword
-	m.RouteByHTTPUser = c.RouteByHTTPUser
-}
-
-func (c *TCPMuxProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.CustomDomains = m.CustomDomains
-	c.SubDomain = m.SubDomain
-	c.Multiplexer = m.Multiplexer
-	c.HTTPUser = m.HTTPUser
-	c.HTTPPassword = m.HTTPPwd
-	c.RouteByHTTPUser = m.RouteByHTTPUser
-}
-
-func (c *TCPMuxProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	out.DomainConfig = c.DomainConfig.Clone()
-	return &out
-}
-
-var _ ProxyConfigurer = &STCPProxyConfig{}
-
-type STCPProxyConfig struct {
-	ProxyBaseConfig
-
-	Secretkey  string   `json:"secretKey,omitempty"`
-	AllowUsers []string `json:"allowUsers,omitempty"`
-}
-
-func (c *STCPProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.Sk = c.Secretkey
-	m.AllowUsers = c.AllowUsers
-}
-
-func (c *STCPProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.Secretkey = m.Sk
-	c.AllowUsers = m.AllowUsers
-}
-
-func (c *STCPProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	out.AllowUsers = slices.Clone(c.AllowUsers)
-	return &out
-}
-
-var _ ProxyConfigurer = &XTCPProxyConfig{}
-
-type XTCPProxyConfig struct {
-	ProxyBaseConfig
-
-	Secretkey  string   `json:"secretKey,omitempty"`
-	AllowUsers []string `json:"allowUsers,omitempty"`
-
-	// NatTraversal configuration for NAT traversal
-	NatTraversal *NatTraversalConfig `json:"natTraversal,omitempty"`
-}
-
-func (c *XTCPProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.Sk = c.Secretkey
-	m.AllowUsers = c.AllowUsers
-}
-
-func (c *XTCPProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.Secretkey = m.Sk
-	c.AllowUsers = m.AllowUsers
-}
-
-func (c *XTCPProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	out.AllowUsers = slices.Clone(c.AllowUsers)
-	out.NatTraversal = c.NatTraversal.Clone()
-	return &out
-}
-
-var _ ProxyConfigurer = &SUDPProxyConfig{}
-
-type SUDPProxyConfig struct {
-	ProxyBaseConfig
-
-	Secretkey  string   `json:"secretKey,omitempty"`
-	AllowUsers []string `json:"allowUsers,omitempty"`
-}
-
-func (c *SUDPProxyConfig) MarshalToMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.MarshalToMsg(m)
-
-	m.Sk = c.Secretkey
-	m.AllowUsers = c.AllowUsers
-}
-
-func (c *SUDPProxyConfig) UnmarshalFromMsg(m *msg.NewProxy) {
-	c.ProxyBaseConfig.UnmarshalFromMsg(m)
-
-	c.Secretkey = m.Sk
-	c.AllowUsers = m.AllowUsers
-}
-
-func (c *SUDPProxyConfig) Clone() ProxyConfigurer {
-	out := *c
-	out.ProxyBaseConfig = c.ProxyBaseConfig.Clone()
-	out.AllowUsers = slices.Clone(c.AllowUsers)
 	return &out
 }

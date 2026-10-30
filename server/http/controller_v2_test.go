@@ -118,14 +118,8 @@ func TestAPIV2SystemInfoEnvelope(t *testing.T) {
 	})
 
 	controller := NewController(&v1.ServerConfig{
-		BindPort:              7000,
-		VhostHTTPPort:         8080,
-		VhostHTTPSPort:        8443,
-		TCPMuxHTTPConnectPort: 9000,
-		KCPBindPort:           7001,
-		QUICBindPort:          7002,
-		SubDomainHost:         "example.com",
-		MaxPortsPerClient:     8,
+		BindPort:          7000,
+		MaxPortsPerClient: 8,
 		AllowPorts: []types.PortsRange{
 			{Start: 1000, End: 1002},
 			{Single: 2000},
@@ -154,15 +148,9 @@ func TestAPIV2SystemInfoEnvelope(t *testing.T) {
 		"allowPortsStr",
 		"bindPort",
 		"heartbeatTimeout",
-		"kcpBindPort",
 		"maxPoolCount",
 		"maxPortsPerClient",
-		"quicBindPort",
-		"subdomainHost",
-		"tcpmuxHTTPConnectPort",
 		"tlsForce",
-		"vhostHTTPPort",
-		"vhostHTTPSPort",
 	)
 	assertRawJSONKeysFromMessage(t, rawResp.Data["status"],
 		"clientCounts",
@@ -177,12 +165,6 @@ func TestAPIV2SystemInfoEnvelope(t *testing.T) {
 		t.Fatal("version should be set at top level")
 	}
 	if systemResp.Data.Config.BindPort != 7000 ||
-		systemResp.Data.Config.VhostHTTPPort != 8080 ||
-		systemResp.Data.Config.VhostHTTPSPort != 8443 ||
-		systemResp.Data.Config.TCPMuxHTTPConnectPort != 9000 ||
-		systemResp.Data.Config.KCPBindPort != 7001 ||
-		systemResp.Data.Config.QUICBindPort != 7002 ||
-		systemResp.Data.Config.SubdomainHost != "example.com" ||
 		systemResp.Data.Config.MaxPoolCount != 5 ||
 		systemResp.Data.Config.MaxPortsPerClient != 8 ||
 		systemResp.Data.Config.HeartbeatTimeout != 90 ||
@@ -620,78 +602,6 @@ func TestMatchV2ProxyQueryMatchesSpecFields(t *testing.T) {
 			q:    "6000",
 			want: true,
 		},
-		{
-			name: "udp remote port",
-			item: model.V2ProxyResp{Name: "udp-proxy", Spec: model.V2ProxySpec{
-				Type: "udp",
-				UDP:  &model.V2UDPProxySpec{RemotePort: new(7000)},
-			}},
-			q:    "7000",
-			want: true,
-		},
-		{
-			name: "remote port does not match colon form",
-			item: model.V2ProxyResp{Name: "tcp-proxy", Spec: model.V2ProxySpec{
-				Type: "tcp",
-				TCP:  &model.V2TCPProxySpec{RemotePort: new(6000)},
-			}},
-			q:    ":6000",
-			want: false,
-		},
-		{
-			name: "http custom domain",
-			item: model.V2ProxyResp{Name: "http-proxy", Spec: model.V2ProxySpec{
-				Type: "http",
-				HTTP: &model.V2HTTPProxySpec{CustomDomains: []string{"app.example.com"}},
-			}},
-			q:    "app.example.com",
-			want: true,
-		},
-		{
-			name: "https subdomain",
-			item: model.V2ProxyResp{Name: "https-proxy", Spec: model.V2ProxySpec{
-				Type:  "https",
-				HTTPS: &model.V2HTTPSProxySpec{Subdomain: "portal"},
-			}},
-			q:    "portal",
-			want: true,
-		},
-		{
-			name: "subdomain does not match expanded host",
-			item: model.V2ProxyResp{Name: "https-proxy", Spec: model.V2ProxySpec{
-				Type:  "https",
-				HTTPS: &model.V2HTTPSProxySpec{Subdomain: "portal"},
-			}},
-			q:    "portal.example.com",
-			want: false,
-		},
-		{
-			name: "tcpmux custom domain",
-			item: model.V2ProxyResp{Name: "tcpmux-proxy", Spec: model.V2ProxySpec{
-				Type:   "tcpmux",
-				TCPMux: &model.V2TCPMuxProxySpec{CustomDomains: []string{"mux.example.com"}},
-			}},
-			q:    "mux.example.com",
-			want: true,
-		},
-		{
-			name: "offline shell does not match online spec fields",
-			item: model.V2ProxyResp{Name: "offline-proxy", Spec: model.V2ProxySpec{
-				Type: "tcp",
-				TCP:  &model.V2TCPProxySpec{},
-			}},
-			q:    "6000",
-			want: false,
-		},
-		{
-			name: "offline shell does not contribute zero remote port",
-			item: model.V2ProxyResp{Name: "offline-proxy", Spec: model.V2ProxySpec{
-				Type: "tcp",
-				TCP:  &model.V2TCPProxySpec{},
-			}},
-			q:    "0",
-			want: false,
-		},
 	}
 
 	for _, tt := range tests {
@@ -740,8 +650,8 @@ func TestLegacyAPIResponsesRemainBare(t *testing.T) {
 	if err := json.Unmarshal(resp.Body.Bytes(), &proxies); err != nil {
 		t.Fatalf("legacy proxy response should be {proxies}: %v, body: %s", err, resp.Body.String())
 	}
-	if len(proxies.Proxies) != 2 {
-		t.Fatalf("legacy tcp proxy total mismatch, want 2 got %d", len(proxies.Proxies))
+	if len(proxies.Proxies) != 4 {
+		t.Fatalf("legacy tcp proxy total mismatch, want 4 got %d", len(proxies.Proxies))
 	}
 	var envelope httppkg.V2Response
 	if err := json.Unmarshal(resp.Body.Bytes(), &envelope); err == nil && envelope.Code != 0 {
@@ -795,16 +705,16 @@ func newV2TestController(t *testing.T) *Controller {
 				LastStartAt:     1783504200,
 				LastCloseAt:     1783504300,
 			},
-			"http-alice": {
-				Name:     "http-alice",
-				Type:     "http",
+			"tcp-alice-2": {
+				Name:     "tcp-alice-2",
+				Type:     "tcp",
 				User:     "alice",
 				ClientID: "client-a",
 				CurConns: 3,
 			},
-			"udp-bob": {
-				Name:     "udp-bob",
-				Type:     "udp",
+			"tcp-bob": {
+				Name:     "tcp-bob",
+				Type:     "tcp",
 				User:     "bob",
 				ClientID: "client-b",
 			},

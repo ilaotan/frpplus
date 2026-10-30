@@ -14,54 +14,31 @@
 
 package msg
 
-import (
-	"net"
-	"reflect"
-)
-
 const (
-	TypeLogin              byte = 'o'
-	TypeLoginResp          byte = '1'
-	TypeNewProxy           byte = 'p'
-	TypeNewProxyResp       byte = '2'
-	TypeCloseProxy         byte = 'c'
-	TypeNewWorkConn        byte = 'w'
-	TypeReqWorkConn        byte = 'r'
-	TypeStartWorkConn      byte = 's'
-	TypeNewVisitorConn     byte = 'v'
-	TypeNewVisitorConnResp byte = '3'
-	TypePing               byte = 'h'
-	TypePong               byte = '4'
-	TypeUDPPacket          byte = 'u'
-	TypeNatHoleVisitor     byte = 'i'
-	TypeNatHoleClient      byte = 'n'
-	TypeNatHoleResp        byte = 'm'
-	TypeNatHoleSid         byte = '5'
-	TypeNatHoleReport      byte = '6'
+	TypeLogin         byte = 'o'
+	TypeLoginResp     byte = '1'
+	TypeNewProxy      byte = 'p'
+	TypeNewProxyResp  byte = '2'
+	TypeCloseProxy    byte = 'c'
+	TypeNewWorkConn   byte = 'w'
+	TypeReqWorkConn   byte = 'r'
+	TypeStartWorkConn byte = 's'
+	TypePing          byte = 'h'
+	TypePong          byte = '4'
 )
 
 var msgTypeMap = map[byte]any{
-	TypeLogin:              Login{},
-	TypeLoginResp:          LoginResp{},
-	TypeNewProxy:           NewProxy{},
-	TypeNewProxyResp:       NewProxyResp{},
-	TypeCloseProxy:         CloseProxy{},
-	TypeNewWorkConn:        NewWorkConn{},
-	TypeReqWorkConn:        ReqWorkConn{},
-	TypeStartWorkConn:      StartWorkConn{},
-	TypeNewVisitorConn:     NewVisitorConn{},
-	TypeNewVisitorConnResp: NewVisitorConnResp{},
-	TypePing:               Ping{},
-	TypePong:               Pong{},
-	TypeUDPPacket:          UDPPacket{},
-	TypeNatHoleVisitor:     NatHoleVisitor{},
-	TypeNatHoleClient:      NatHoleClient{},
-	TypeNatHoleResp:        NatHoleResp{},
-	TypeNatHoleSid:         NatHoleSid{},
-	TypeNatHoleReport:      NatHoleReport{},
+	TypeLogin:         Login{},
+	TypeLoginResp:     LoginResp{},
+	TypeNewProxy:      NewProxy{},
+	TypeNewProxyResp:  NewProxyResp{},
+	TypeCloseProxy:    CloseProxy{},
+	TypeNewWorkConn:   NewWorkConn{},
+	TypeReqWorkConn:   ReqWorkConn{},
+	TypeStartWorkConn: StartWorkConn{},
+	TypePing:          Ping{},
+	TypePong:          Pong{},
 }
-
-var TypeNameNatHoleResp = reflect.TypeFor[NatHoleResp]().Name()
 
 type ClientSpec struct {
 	// Due to the support of VirtualClient, frps needs to know the client type in order to
@@ -160,20 +137,6 @@ type StartWorkConn struct {
 	Error     string `json:"error,omitempty"`
 }
 
-type NewVisitorConn struct {
-	RunID          string `json:"run_id,omitempty"`
-	ProxyName      string `json:"proxy_name,omitempty"`
-	SignKey        string `json:"sign_key,omitempty"`
-	Timestamp      int64  `json:"timestamp,omitempty"`
-	UseEncryption  bool   `json:"use_encryption,omitempty"`
-	UseCompression bool   `json:"use_compression,omitempty"`
-}
-
-type NewVisitorConnResp struct {
-	ProxyName string `json:"proxy_name,omitempty"`
-	Error     string `json:"error,omitempty"`
-}
-
 type Ping struct {
 	PrivilegeKey string `json:"privilege_key,omitempty"`
 	Timestamp    int64  `json:"timestamp,omitempty"`
@@ -181,67 +144,4 @@ type Ping struct {
 
 type Pong struct {
 	Error string `json:"error,omitempty"`
-}
-
-type UDPPacket struct {
-	Content    []byte       `json:"c,omitempty"`
-	LocalAddr  *net.UDPAddr `json:"l,omitempty"`
-	RemoteAddr *net.UDPAddr `json:"r,omitempty"`
-}
-
-type NatHoleVisitor struct {
-	TransactionID string   `json:"transaction_id,omitempty"`
-	ProxyName     string   `json:"proxy_name,omitempty"`
-	PreCheck      bool     `json:"pre_check,omitempty"`
-	Protocol      string   `json:"protocol,omitempty"`
-	SignKey       string   `json:"sign_key,omitempty"`
-	Timestamp     int64    `json:"timestamp,omitempty"`
-	MappedAddrs   []string `json:"mapped_addrs,omitempty"`
-	AssistedAddrs []string `json:"assisted_addrs,omitempty"`
-}
-
-type NatHoleClient struct {
-	TransactionID string   `json:"transaction_id,omitempty"`
-	ProxyName     string   `json:"proxy_name,omitempty"`
-	Sid           string   `json:"sid,omitempty"`
-	MappedAddrs   []string `json:"mapped_addrs,omitempty"`
-	AssistedAddrs []string `json:"assisted_addrs,omitempty"`
-}
-
-type PortsRange struct {
-	From int `json:"from,omitempty"`
-	To   int `json:"to,omitempty"`
-}
-
-type NatHoleDetectBehavior struct {
-	Role              string       `json:"role,omitempty"` // sender or receiver
-	Mode              int          `json:"mode,omitempty"` // 0, 1, 2...
-	TTL               int          `json:"ttl,omitempty"`
-	SendDelayMs       int          `json:"send_delay_ms,omitempty"`
-	ReadTimeoutMs     int          `json:"read_timeout,omitempty"`
-	CandidatePorts    []PortsRange `json:"candidate_ports,omitempty"`
-	SendRandomPorts   int          `json:"send_random_ports,omitempty"`
-	ListenRandomPorts int          `json:"listen_random_ports,omitempty"`
-}
-
-type NatHoleResp struct {
-	TransactionID  string                `json:"transaction_id,omitempty"`
-	Sid            string                `json:"sid,omitempty"`
-	Protocol       string                `json:"protocol,omitempty"`
-	CandidateAddrs []string              `json:"candidate_addrs,omitempty"`
-	AssistedAddrs  []string              `json:"assisted_addrs,omitempty"`
-	DetectBehavior NatHoleDetectBehavior `json:"detect_behavior,omitempty"`
-	Error          string                `json:"error,omitempty"`
-}
-
-type NatHoleSid struct {
-	TransactionID string `json:"transaction_id,omitempty"`
-	Sid           string `json:"sid,omitempty"`
-	Response      bool   `json:"response,omitempty"`
-	Nonce         string `json:"nonce,omitempty"`
-}
-
-type NatHoleReport struct {
-	Sid     string `json:"sid,omitempty"`
-	Success bool   `json:"success,omitempty"`
 }

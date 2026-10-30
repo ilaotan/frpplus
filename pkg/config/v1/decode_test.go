@@ -20,49 +20,6 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestDecodeProxyConfigurerJSON_StrictPluginUnknownFields(t *testing.T) {
-	require := require.New(t)
-
-	data := []byte(`{
-		"name":"p1",
-		"type":"tcp",
-		"localPort":10080,
-		"plugin":{
-			"type":"http2https",
-			"localAddr":"127.0.0.1:8080",
-			"unknownInPlugin":"value"
-		}
-	}`)
-
-	_, err := DecodeProxyConfigurerJSON(data, DecodeOptions{DisallowUnknownFields: false})
-	require.NoError(err)
-
-	_, err = DecodeProxyConfigurerJSON(data, DecodeOptions{DisallowUnknownFields: true})
-	require.ErrorContains(err, "unknownInPlugin")
-}
-
-func TestDecodeVisitorConfigurerJSON_StrictPluginUnknownFields(t *testing.T) {
-	require := require.New(t)
-
-	data := []byte(`{
-		"name":"v1",
-		"type":"stcp",
-		"serverName":"server",
-		"bindPort":10081,
-		"plugin":{
-			"type":"virtual_net",
-			"destinationIP":"10.0.0.1",
-			"unknownInPlugin":"value"
-		}
-	}`)
-
-	_, err := DecodeVisitorConfigurerJSON(data, DecodeOptions{DisallowUnknownFields: false})
-	require.NoError(err)
-
-	_, err = DecodeVisitorConfigurerJSON(data, DecodeOptions{DisallowUnknownFields: true})
-	require.ErrorContains(err, "unknownInPlugin")
-}
-
 func TestDecodeClientConfigJSON_StrictUnknownProxyField(t *testing.T) {
 	require := require.New(t)
 

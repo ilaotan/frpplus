@@ -50,7 +50,7 @@ func TestClientTLSCATrustSources(t *testing.T) {
 }
 
 func TestClientSystemCARequiresTLS(t *testing.T) {
-	for _, protocol := range []string{"tcp", "kcp", "quic", "websocket", "wss"} {
+	for _, protocol := range []string{"tcp"} {
 		for _, state := range []struct {
 			name   string
 			enable *bool
@@ -79,7 +79,7 @@ func TestClientSystemCARequiresTLS(t *testing.T) {
 }
 
 func TestDisabledTLSFileWarnings(t *testing.T) {
-	for _, protocol := range []string{"tcp", "kcp", "quic", "websocket", "wss"} {
+	for _, protocol := range []string{"tcp"} {
 		t.Run(protocol, func(t *testing.T) {
 			cfg := &v1.ClientCommonConfig{}
 			cfg.Transport.Protocol = protocol
@@ -107,10 +107,6 @@ func TestSystemCAUnsupportedLocations(t *testing.T) {
 		{
 			name: "frps transport", server: true,
 			configJSON: `{"transport":{"tls":{"useSystemCa":%t}}}`, fieldPath: "transport.tls.useSystemCa",
-		},
-		{
-			name: "frpc webServer", configJSON: `{"webServer":{"tls":{"certFile":"server.pem","keyFile":"server.key","useSystemCa":%t}}}`,
-			fieldPath: "webServer.tls.useSystemCa",
 		},
 		{
 			name: "frps webServer", server: true,

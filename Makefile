@@ -1,11 +1,11 @@
 export PATH := $(PATH):`go env GOPATH`/bin
 export GO111MODULE=on
 LDFLAGS := -s -w
-NOWEB_TAG = $(shell [ ! -d web/frps/dist ] || [ ! -d web/frpc/dist ] && echo ',noweb')
+NOWEB_TAG = $(shell [ ! -d web/frps/dist ] && echo ',noweb')
 FRP_COMPAT_BASELINE_COUNT ?= 8
 FRP_COMPAT_FLOOR_VERSION ?= 0.61.0
 
-.PHONY: web web-ci frps-web frpc-web frps frpc e2e-compatibility-smoke e2e-compatibility e2e-compatibility-floor
+.PHONY: web web-ci frps-web frps frpc e2e-compatibility-smoke e2e-compatibility e2e-compatibility-floor
 
 all: env fmt web build
 
@@ -14,16 +14,13 @@ build: frps frpc
 env:
 	@go version
 
-web: frps-web frpc-web
+web: frps-web
 
 web-ci:
-	cd web && npm ci && npm run lint:check --workspace frps && npm run lint:check --workspace frpc && npm run test:unit && npm run build --workspace frps && npm run build --workspace frpc
+	cd web && npm ci && npm run lint:check --workspace frps && npm run test:unit && npm run build --workspace frps
 
 frps-web:
 	$(MAKE) -C web/frps build
-
-frpc-web:
-	$(MAKE) -C web/frpc build
 
 fmt:
 	go fmt ./...

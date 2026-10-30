@@ -44,28 +44,15 @@ func (v *ConfigValidator) ValidateServerConfig(c *v1.ServerConfig) (Warning, err
 	if err := validateWebServerConfig(&c.WebServer); err != nil {
 		errs = AppendError(errs, err)
 	}
-	if err := validateMetricsServerConfig(&c.MetricsServer, &c.WebServer); err != nil {
-		errs = AppendError(errs, err)
-	}
 	if c.Transport.TLS.UseSystemCa {
 		errs = AppendError(errs, fmt.Errorf("transport.tls.useSystemCa is only supported in frpc transport.tls"))
 	}
 
 	errs = AppendError(errs, ValidatePort(c.BindPort, "bindPort"))
-	errs = AppendError(errs, ValidatePort(c.KCPBindPort, "kcpBindPort"))
-	errs = AppendError(errs, ValidatePort(c.QUICBindPort, "quicBindPort"))
-	errs = AppendError(errs, ValidatePort(c.VhostHTTPPort, "vhostHTTPPort"))
-	errs = AppendError(errs, ValidatePort(c.VhostHTTPSPort, "vhostHTTPSPort"))
-	errs = AppendError(errs, ValidatePort(c.TCPMuxHTTPConnectPort, "tcpMuxHTTPConnectPort"))
 	if c.Transport.MaxPoolCount < 0 {
 		errs = AppendError(errs, fmt.Errorf("invalid transport.maxPoolCount, must be non-negative"))
 	}
 
-	for _, p := range c.HTTPPlugins {
-		if !lo.Every(SupportedHTTPPluginOps, p.Ops) {
-			errs = AppendError(errs, fmt.Errorf("invalid http plugin ops, optional values are %v", SupportedHTTPPluginOps))
-		}
-	}
 	if err := validateIPAccessControlConfig(&c.IPAccessControl); err != nil {
 		errs = AppendError(errs, err)
 	}
@@ -83,13 +70,8 @@ var supportedIPAccessModes = []string{
 const maxSelfAllowHours = 24 * 30
 
 // supportedIPAccessTypes are the proxy types the ip access control can judge.
-// Visitor based proxies are missing on purpose: on the server side they only
-// see the address of the visitor, not of the end user.
 var supportedIPAccessTypes = []string{
 	string(v1.ProxyTypeTCP),
-	string(v1.ProxyTypeHTTP),
-	string(v1.ProxyTypeHTTPS),
-	string(v1.ProxyTypeTCPMUX),
 }
 
 func validateIPAccessControlConfig(c *v1.IPAccessControlConfig) error {

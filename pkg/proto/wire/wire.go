@@ -22,7 +22,7 @@ import (
 	"net"
 	"slices"
 
-	libnet "github.com/fatedier/golib/net"
+	"github.com/fatedier/frp/pkg/util/sharedconn"
 )
 
 const (
@@ -36,7 +36,6 @@ const (
 	FrameTypeMessage     uint16 = 16
 
 	MessageCodecJSON           = "json"
-	UDPPacketCodecBinary       = "binary-v1"
 	DefaultMaxFramePayloadSize = 64 * 1024
 
 	MagicV2 = "FRP\x00\x02\r\n"
@@ -153,7 +152,7 @@ func WriteMagicIfV2(w io.Writer, wireProtocol string) error {
 }
 
 func CheckMagic(conn net.Conn) (out net.Conn, isV2 bool, err error) {
-	sharedConn, r := libnet.NewSharedConnSize(conn, len(MagicV2))
+	sharedConn, r := sharedconn.NewConn(conn, len(MagicV2))
 	buf := make([]byte, len(MagicV2))
 	if _, err = io.ReadFull(r, buf); err != nil {
 		return nil, false, err
@@ -183,8 +182,7 @@ type ClientCapabilities struct {
 }
 
 type MessageCapabilities struct {
-	Codecs          []string `json:"codecs,omitempty"`
-	UDPPacketCodecs []string `json:"udpPacketCodecs,omitempty"`
+	Codecs []string `json:"codecs,omitempty"`
 }
 
 type CryptoCapabilities struct {
@@ -203,8 +201,7 @@ type ServerSelection struct {
 }
 
 type MessageSelection struct {
-	Codec          string `json:"codec,omitempty"`
-	UDPPacketCodec string `json:"udpPacketCodec,omitempty"`
+	Codec string `json:"codec,omitempty"`
 }
 
 type CryptoSelection struct {
@@ -217,8 +214,7 @@ func clientHelloWithCryptoRandom(bootstrap BootstrapInfo, clientRandom []byte) C
 		Bootstrap: bootstrap,
 		Capabilities: ClientCapabilities{
 			Message: MessageCapabilities{
-				Codecs:          []string{MessageCodecJSON},
-				UDPPacketCodecs: []string{UDPPacketCodecBinary},
+				Codecs: []string{MessageCodecJSON},
 			},
 			Crypto: CryptoCapabilities{
 				Algorithms:   PreferredAEADAlgorithms(),

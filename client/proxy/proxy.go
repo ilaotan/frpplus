@@ -25,18 +25,16 @@ import (
 	"time"
 
 	libio "github.com/fatedier/golib/io"
-	libnet "github.com/fatedier/golib/net"
+	pp "github.com/pires/go-proxyproto"
 	"golang.org/x/time/rate"
 
 	"github.com/fatedier/frp/pkg/config/types"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/msg"
-	plugin "github.com/fatedier/frp/pkg/plugin/client"
 	"github.com/fatedier/frp/pkg/transport"
 	"github.com/fatedier/frp/pkg/util/limit"
 	netpkg "github.com/fatedier/frp/pkg/util/net"
 	"github.com/fatedier/frp/pkg/util/xlog"
-	"github.com/fatedier/frp/pkg/vnet"
 )
 
 var proxyFactoryRegistry = map[reflect.Type]func(*BaseProxy, v1.ProxyConfigurer) Proxy{}
@@ -60,8 +58,6 @@ func NewProxy(
 	clientCfg *v1.ClientCommonConfig,
 	encryptionKey []byte,
 	msgTransporter transport.MessageTransporter,
-	vnetController *vnet.Controller,
-	udpPacketCodec string,
 ) (pxy Proxy) {
 	var limiter *rate.Limiter
 	limitBytes := pxyConf.GetBaseConfig().Transport.BandwidthLimit.Bytes()
@@ -75,10 +71,8 @@ func NewProxy(
 		encryptionKey:  encryptionKey,
 		limiter:        limiter,
 		msgTransporter: msgTransporter,
-		vnetController: vnetController,
 		xl:             xlog.FromContextSafe(ctx),
 		ctx:            ctx,
-		udpPacketCodec: udpPacketCodec,
 	}
 
 	factory := proxyFactoryRegistry[reflect.TypeOf(pxyConf)]
@@ -89,45 +83,23 @@ func NewProxy(
 }
 
 type BaseProxy struct {
-	baseCfg        *v1.ProxyBaseConfig
-	clientCfg      *v1.ClientCommonConfig
-	encryptionKey  []byte
-	msgTransporter transport.MessageTransporter
-	vnetController *vnet.Controller
-	limiter        *rate.Limiter
-	// proxyPlugin is used to handle connections instead of dialing to local service.
-	// It's only validate for TCP protocol now.
-	proxyPlugin        plugin.Plugin
+	baseCfg            *v1.ProxyBaseConfig
+	clientCfg          *v1.ClientCommonConfig
+	encryptionKey      []byte
+	msgTransporter     transport.MessageTransporter
+	limiter            *rate.Limiter
 	inWorkConnCallback func(*v1.ProxyBaseConfig, net.Conn, *msg.StartWorkConn) /* continue */ bool
 
-	mu             sync.RWMutex
-	xl             *xlog.Logger
-	ctx            context.Context
-	udpPacketCodec string
+	mu  sync.RWMutex
+	xl  *xlog.Logger
+	ctx context.Context
 }
 
 func (pxy *BaseProxy) Run() error {
-	if pxy.baseCfg.Plugin.Type != "" {
-		p, err := plugin.Create(pxy.baseCfg.Plugin.Type, plugin.PluginContext{
-			Name:           pxy.baseCfg.Name,
-			VnetController: pxy.vnetController,
-		}, pxy.baseCfg.Plugin.ClientPluginOptions)
-		if err != nil {
-			return err
-		}
-		pxy.proxyPlugin = p
-	}
 	return nil
 }
 
-// getPlugin is accessed while the owning Wrapper holds its lifecycle lock.
-func (pxy *BaseProxy) getPlugin() plugin.Plugin { return pxy.proxyPlugin }
-
-func (pxy *BaseProxy) Close() {
-	if pxy.proxyPlugin != nil {
-		pxy.proxyPlugin.Close()
-	}
-}
+func (pxy *BaseProxy) Close() {}
 
 // wrapWorkConn applies rate limiting, encryption, and compression
 // to a work connection based on the proxy's transport configuration.
@@ -204,36 +176,19 @@ func (pxy *BaseProxy) HandleTCPWorkConnection(workConn net.Conn, m *msg.StartWor
 	}
 
 	// check if we need to send proxy protocol info
-	var connInfo plugin.ConnectionInfo
-	if m.SrcAddr != "" && m.SrcPort != 0 {
-		connInfo.SrcAddr = srcAddr
-		connInfo.DstAddr = dstAddr
-	}
-
+	var proxyProtocolHeader *pp.Header
 	if baseCfg.Transport.ProxyProtocolVersion != "" && m.SrcAddr != "" && m.SrcPort != 0 {
-		header := netpkg.BuildProxyProtocolHeaderStruct(connInfo.SrcAddr, connInfo.DstAddr, baseCfg.Transport.ProxyProtocolVersion)
-		connInfo.ProxyProtocolHeader = header
-	}
-	connInfo.Conn = remote
-	connInfo.UnderlyingConn = workConn
-
-	if pxy.proxyPlugin != nil {
-		// if plugin is set, let plugin handle connection first
-		// Don't recycle compression resources here because plugins may
-		// retain the connection after Handle returns.
-		xl.Debugf("handle by plugin: %s", pxy.proxyPlugin.Name())
-		pxy.proxyPlugin.Handle(pxy.ctx, &connInfo)
-		xl.Debugf("handle by plugin finished")
-		return
+		proxyProtocolHeader = netpkg.BuildProxyProtocolHeaderStruct(srcAddr, dstAddr, baseCfg.Transport.ProxyProtocolVersion)
 	}
 
 	if recycleFn != nil {
 		defer recycleFn()
 	}
 
-	localConn, err := libnet.Dial(
+	localConn, err := net.DialTimeout(
+		"tcp",
 		net.JoinHostPort(baseCfg.LocalIP, strconv.Itoa(baseCfg.LocalPort)),
-		libnet.WithTimeout(10*time.Second),
+		10*time.Second,
 	)
 	if err != nil {
 		workConn.Close()
@@ -244,8 +199,8 @@ func (pxy *BaseProxy) HandleTCPWorkConnection(workConn net.Conn, m *msg.StartWor
 	xl.Debugf("join connections, localConn(l[%s] r[%s]) workConn(l[%s] r[%s])", localConn.LocalAddr().String(),
 		localConn.RemoteAddr().String(), workConn.LocalAddr().String(), workConn.RemoteAddr().String())
 
-	if connInfo.ProxyProtocolHeader != nil {
-		if _, err := connInfo.ProxyProtocolHeader.WriteTo(localConn); err != nil {
+	if proxyProtocolHeader != nil {
+		if _, err := proxyProtocolHeader.WriteTo(localConn); err != nil {
 			workConn.Close()
 			localConn.Close()
 			xl.Errorf("write proxy protocol header to local conn error: %v", err)

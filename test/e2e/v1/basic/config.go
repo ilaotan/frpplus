@@ -1,7 +1,6 @@
 package basic
 
 import (
-	"context"
 	"fmt"
 
 	"github.com/onsi/ginkgo/v2"
@@ -41,10 +40,11 @@ var _ = ginkgo.Describe("[Feature: Config]", func() {
 		})
 
 		ginkgo.It("Range ports mapping", func() {
-			serverConf := consts.DefaultServerConfig
+			dashboardPort := f.AllocPort()
+			serverConf := consts.DefaultServerConfig + fmt.Sprintf(`
+			webServer.port = %d
+			`, dashboardPort)
 			clientConf := consts.DefaultClientConfig
-
-			adminPort := f.AllocPort()
 
 			localPortsRange := "13010-13012,13014"
 			remotePortsRange := "23010-23012,23014"
@@ -52,8 +52,6 @@ var _ = ginkgo.Describe("[Feature: Config]", func() {
 				return "{{ `" + s + "` }}"
 			}
 			clientConf += fmt.Sprintf(`
-			webServer.port = %d
-
 			%s
 			[[proxies]]
 			name = "tcp-%s"
@@ -61,7 +59,7 @@ var _ = ginkgo.Describe("[Feature: Config]", func() {
 			localPort = %s
 			remotePort = %s
 			%s
-			`, adminPort,
+			`,
 				escapeTemplate(fmt.Sprintf(`{{- range $_, $v := parseNumberRangePair "%s" "%s" }}`, localPortsRange, remotePortsRange)),
 				escapeTemplate("{{ $v.First }}"),
 				escapeTemplate("{{ $v.First }}"),
@@ -71,18 +69,19 @@ var _ = ginkgo.Describe("[Feature: Config]", func() {
 
 			f.RunProcesses(serverConf, []string{clientConf})
 
-			client := f.APIClientForFrpc(adminPort)
-			checkProxyFn := func(name string, localPort, remotePort int) {
-				status, err := client.GetProxyStatus(context.Background(), name)
-				framework.ExpectNoError(err)
+			proxies, err := framework.GetFrpsProxies(dashboardPort)
+			framework.ExpectNoError(err)
 
-				framework.ExpectContainSubstring(status.LocalAddr, fmt.Sprintf(":%d", localPort))
-				framework.ExpectContainSubstring(status.RemoteAddr, fmt.Sprintf(":%d", remotePort))
+			got := make(map[string]int, len(proxies))
+			for _, proxy := range proxies {
+				if remotePort, ok := proxy.Conf["remotePort"].(float64); ok {
+					got[proxy.Name] = int(remotePort)
+				}
 			}
-			checkProxyFn("tcp-13010", 13010, 23010)
-			checkProxyFn("tcp-13011", 13011, 23011)
-			checkProxyFn("tcp-13012", 13012, 23012)
-			checkProxyFn("tcp-13014", 13014, 23014)
+			for localPort, remotePort := range map[int]int{13010: 23010, 13011: 23011, 13012: 23012, 13014: 23014} {
+				name := fmt.Sprintf("tcp-%d", localPort)
+				framework.ExpectEqual(got[name], remotePort)
+			}
 		})
 	})
 

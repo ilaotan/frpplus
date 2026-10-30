@@ -19,11 +19,9 @@ import (
 	"fmt"
 	"io/fs"
 	"os"
-	"os/signal"
 	"path/filepath"
 	"strings"
 	"sync"
-	"syscall"
 	"time"
 
 	"github.com/spf13/cobra"
@@ -112,13 +110,6 @@ func Execute() {
 	}
 }
 
-func handleTermSignal(svr *client.Service) {
-	ch := make(chan os.Signal, 1)
-	signal.Notify(ch, syscall.SIGINT, syscall.SIGTERM)
-	<-ch
-	svr.GracefulClose(500 * time.Millisecond)
-}
-
 func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) error {
 	// Load configuration
 	result, err := config.LoadClientConfigResult(cfgFilePath, strictConfigMode)
@@ -136,7 +127,7 @@ func runClient(cfgFilePath string, unsafeFeatures *security.UnsafeFeatures) erro
 // runClientWithAggregator runs the client using the internal source aggregator.
 func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatures *security.UnsafeFeatures, cfgFilePath string) error {
 	configSource := source.NewConfigSource()
-	if err := configSource.ReplaceAll(result.Proxies, result.Visitors); err != nil {
+	if err := configSource.ReplaceAll(result.Proxies); err != nil {
 		return fmt.Errorf("failed to set config source: %w", err)
 	}
 
@@ -162,16 +153,15 @@ func runClientWithAggregator(result *config.ClientConfigLoadResult, unsafeFeatur
 		aggregator.SetStoreSource(storeSource)
 	}
 
-	proxyCfgs, visitorCfgs, err := aggregator.Load()
+	proxyCfgs, err := aggregator.Load()
 	if err != nil {
 		return fmt.Errorf("failed to load config from sources: %w", err)
 	}
 
-	proxyCfgs, visitorCfgs = config.FilterClientConfigurers(result.Common, proxyCfgs, visitorCfgs)
+	proxyCfgs = config.FilterClientConfigurers(result.Common, proxyCfgs)
 	proxyCfgs = config.CompleteProxyConfigurers(proxyCfgs)
-	visitorCfgs = config.CompleteVisitorConfigurers(visitorCfgs)
 
-	warning, err := validation.ValidateAllClientConfig(result.Common, proxyCfgs, visitorCfgs, unsafeFeatures)
+	warning, err := validation.ValidateAllClientConfig(result.Common, proxyCfgs, unsafeFeatures)
 	if warning != nil {
 		fmt.Printf("WARNING: %v\n", warning)
 	}
@@ -204,9 +194,5 @@ func startServiceWithAggregator(
 		return err
 	}
 
-	shouldGracefulClose := cfg.Transport.Protocol == "kcp" || cfg.Transport.Protocol == "quic"
-	if shouldGracefulClose {
-		go handleTermSignal(svr)
-	}
 	return svr.Run(context.Background())
 }

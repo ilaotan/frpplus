@@ -46,13 +46,6 @@ const (
 
 var apiV2ProxyTypes = []string{
 	string(v1.ProxyTypeTCP),
-	string(v1.ProxyTypeUDP),
-	string(v1.ProxyTypeHTTP),
-	string(v1.ProxyTypeHTTPS),
-	string(v1.ProxyTypeTCPMUX),
-	string(v1.ProxyTypeSTCP),
-	string(v1.ProxyTypeXTCP),
-	string(v1.ProxyTypeSUDP),
 }
 
 // /api/v2/system/info
@@ -66,18 +59,12 @@ func (c *Controller) APIV2SystemInfo(ctx *httppkg.Context) (any, error) {
 	return model.V2SystemInfoResp{
 		Version: info.Version,
 		Config: model.V2SystemInfoConfigResp{
-			BindPort:              info.BindPort,
-			VhostHTTPPort:         info.VhostHTTPPort,
-			VhostHTTPSPort:        info.VhostHTTPSPort,
-			TCPMuxHTTPConnectPort: info.TCPMuxHTTPConnectPort,
-			KCPBindPort:           info.KCPBindPort,
-			QUICBindPort:          info.QUICBindPort,
-			SubdomainHost:         info.SubdomainHost,
-			MaxPoolCount:          info.MaxPoolCount,
-			MaxPortsPerClient:     info.MaxPortsPerClient,
-			HeartbeatTimeout:      info.HeartBeatTimeout,
-			AllowPortsStr:         info.AllowPortsStr,
-			TLSForce:              info.TLSForce,
+			BindPort:          info.BindPort,
+			MaxPoolCount:      info.MaxPoolCount,
+			MaxPortsPerClient: info.MaxPortsPerClient,
+			HeartbeatTimeout:  info.HeartBeatTimeout,
+			AllowPortsStr:     info.AllowPortsStr,
+			TLSForce:          info.TLSForce,
 		},
 		Status: model.V2SystemInfoStatusResp{
 			TotalTrafficIn:  info.TotalTrafficIn,
@@ -442,29 +429,9 @@ func matchV2ProxyQuery(item model.V2ProxyResp, q string) bool {
 		item.Status.State,
 	}
 
-	switch item.Spec.Type {
-	case string(v1.ProxyTypeTCP):
+	if item.Spec.Type == string(v1.ProxyTypeTCP) {
 		if item.Spec.TCP != nil && item.Spec.TCP.RemotePort != nil {
 			values = append(values, strconv.Itoa(*item.Spec.TCP.RemotePort))
-		}
-	case string(v1.ProxyTypeUDP):
-		if item.Spec.UDP != nil && item.Spec.UDP.RemotePort != nil {
-			values = append(values, strconv.Itoa(*item.Spec.UDP.RemotePort))
-		}
-	case string(v1.ProxyTypeHTTP):
-		if item.Spec.HTTP != nil {
-			values = append(values, item.Spec.HTTP.CustomDomains...)
-			values = append(values, item.Spec.HTTP.Subdomain)
-		}
-	case string(v1.ProxyTypeHTTPS):
-		if item.Spec.HTTPS != nil {
-			values = append(values, item.Spec.HTTPS.CustomDomains...)
-			values = append(values, item.Spec.HTTPS.Subdomain)
-		}
-	case string(v1.ProxyTypeTCPMUX):
-		if item.Spec.TCPMux != nil {
-			values = append(values, item.Spec.TCPMux.CustomDomains...)
-			values = append(values, item.Spec.TCPMux.Subdomain)
 		}
 	}
 
@@ -564,67 +531,13 @@ func (c *Controller) buildV2ProxyResp(ps *mem.ProxyStats) model.V2ProxyResp {
 func buildV2ProxySpec(proxyType string, cfg v1.ProxyConfigurer) model.V2ProxySpec {
 	spec := model.V2ProxySpec{Type: proxyType}
 
-	switch proxyType {
-	case string(v1.ProxyTypeTCP):
+	if proxyType == string(v1.ProxyTypeTCP) {
 		block := &model.V2TCPProxySpec{}
 		if c, ok := cfg.(*v1.TCPProxyConfig); ok {
 			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
 			block.RemotePort = &c.RemotePort
 		}
 		spec.TCP = block
-	case string(v1.ProxyTypeUDP):
-		block := &model.V2UDPProxySpec{}
-		if c, ok := cfg.(*v1.UDPProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-			block.RemotePort = &c.RemotePort
-		}
-		spec.UDP = block
-	case string(v1.ProxyTypeHTTP):
-		block := &model.V2HTTPProxySpec{}
-		if c, ok := cfg.(*v1.HTTPProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-			block.CustomDomains = slices.Clone(c.CustomDomains)
-			block.Subdomain = c.SubDomain
-			block.Locations = slices.Clone(c.Locations)
-			block.HostHeaderRewrite = c.HostHeaderRewrite
-		}
-		spec.HTTP = block
-	case string(v1.ProxyTypeHTTPS):
-		block := &model.V2HTTPSProxySpec{}
-		if c, ok := cfg.(*v1.HTTPSProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-			block.CustomDomains = slices.Clone(c.CustomDomains)
-			block.Subdomain = c.SubDomain
-		}
-		spec.HTTPS = block
-	case string(v1.ProxyTypeTCPMUX):
-		block := &model.V2TCPMuxProxySpec{}
-		if c, ok := cfg.(*v1.TCPMuxProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-			block.CustomDomains = slices.Clone(c.CustomDomains)
-			block.Subdomain = c.SubDomain
-			block.Multiplexer = c.Multiplexer
-			block.RouteByHTTPUser = c.RouteByHTTPUser
-		}
-		spec.TCPMux = block
-	case string(v1.ProxyTypeSTCP):
-		block := &model.V2STCPProxySpec{}
-		if c, ok := cfg.(*v1.STCPProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-		}
-		spec.STCP = block
-	case string(v1.ProxyTypeSUDP):
-		block := &model.V2SUDPProxySpec{}
-		if c, ok := cfg.(*v1.SUDPProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-		}
-		spec.SUDP = block
-	case string(v1.ProxyTypeXTCP):
-		block := &model.V2XTCPProxySpec{}
-		if c, ok := cfg.(*v1.XTCPProxyConfig); ok {
-			block.V2ProxyBaseSpec = buildV2ProxyBaseSpec(c.GetBaseConfig())
-		}
-		spec.XTCP = block
 	}
 
 	return spec

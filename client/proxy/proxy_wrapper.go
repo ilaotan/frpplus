@@ -30,10 +30,8 @@ import (
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/msg"
 	"github.com/fatedier/frp/pkg/naming"
-	plugin "github.com/fatedier/frp/pkg/plugin/client"
 	"github.com/fatedier/frp/pkg/transport"
 	"github.com/fatedier/frp/pkg/util/xlog"
-	"github.com/fatedier/frp/pkg/vnet"
 )
 
 const (
@@ -76,8 +74,6 @@ type Wrapper struct {
 	handler event.Handler
 
 	msgTransporter transport.MessageTransporter
-	// vnet controller
-	vnetController *vnet.Controller
 
 	health           uint32
 	lastSendStartMsg time.Time
@@ -99,8 +95,6 @@ func NewWrapper(
 	encryptionKey []byte,
 	eventHandler event.Handler,
 	msgTransporter transport.MessageTransporter,
-	vnetController *vnet.Controller,
-	udpPacketCodec string,
 ) *Wrapper {
 	baseInfo := cfg.GetBaseConfig()
 	xl := xlog.FromContextSafe(ctx).Spawn().AppendPrefix(baseInfo.Name)
@@ -115,7 +109,6 @@ func NewWrapper(
 		healthNotifyCh: make(chan struct{}),
 		handler:        eventHandler,
 		msgTransporter: msgTransporter,
-		vnetController: vnetController,
 		xl:             xl,
 		ctx:            xlog.NewContext(ctx, xl),
 		wireName:       naming.AddUserPrefix(clientCfg.User, baseInfo.Name),
@@ -129,7 +122,7 @@ func NewWrapper(
 		xl.Tracef("enable health check monitor")
 	}
 
-	pw.pxy = NewProxy(pw.ctx, pw.Cfg, clientCfg, encryptionKey, pw.msgTransporter, pw.vnetController, udpPacketCodec)
+	pw.pxy = NewProxy(pw.ctx, pw.Cfg, clientCfg, encryptionKey, pw.msgTransporter)
 	return pw
 }
 
@@ -278,29 +271,10 @@ func (pw *Wrapper) InWorkConn(workConn net.Conn, m *msg.StartWorkConn) {
 	}
 }
 
-// reloadablePlugin owns its reload serialization and error snapshot. ReloadError
-// must not block on I/O. Reload must be safe during Close, and retain usable
-// resources on failure. Existing plugins need not implement this capability.
-type reloadablePlugin interface {
-	plugin.Plugin
-	Reload() error
-	ReloadError() error
-}
-
-// Caller holds pw.mu. Concrete reloadable plugins are pointer instances.
-func (pw *Wrapper) reloadablePluginLocked() reloadablePlugin {
-	owner, ok := pw.pxy.(interface{ getPlugin() plugin.Plugin })
-	if !ok {
-		return nil
-	}
-	p, _ := owner.getPlugin().(reloadablePlugin)
-	return p
-}
-
 func (pw *Wrapper) GetStatus() *WorkingStatus {
 	pw.mu.RLock()
 	defer pw.mu.RUnlock()
-	ps := &WorkingStatus{
+	return &WorkingStatus{
 		Name:       pw.Name,
 		Type:       pw.Type,
 		Phase:      pw.Phase,
@@ -308,15 +282,4 @@ func (pw *Wrapper) GetStatus() *WorkingStatus {
 		Cfg:        pw.Cfg,
 		RemoteAddr: pw.RemoteAddr,
 	}
-	if pw.Phase == ProxyPhaseRunning {
-		if p := pw.reloadablePluginLocked(); p != nil {
-			if err := p.ReloadError(); err != nil {
-				if ps.Err != "" {
-					ps.Err += "; "
-				}
-				ps.Err += fmt.Sprintf("reload plugin %s: %v", p.Name(), err)
-			}
-		}
-	}
-	return ps
 }

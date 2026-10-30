@@ -81,10 +81,8 @@ frp also offers a P2P connect mode.
     * [Client Admin UI](#client-admin-ui)
         * [Dynamic Proxy Management (Store)](#dynamic-proxy-management-store)
     * [Monitor](#monitor)
-        * [Prometheus](#prometheus)
     * [Authenticating the Client](#authenticating-the-client)
         * [Token Authentication](#token-authentication)
-        * [OIDC Authentication](#oidc-authentication)
     * [Encryption and Compression](#encryption-and-compression)
         * [TLS](#tls)
     * [Hot-Reloading frpc configuration](#hot-reloading-frpc-configuration)
@@ -108,7 +106,6 @@ frp also offers a P2P connect mode.
     * [Custom Subdomain Names](#custom-subdomain-names)
     * [URL Routing](#url-routing)
     * [TCP Port Multiplexing](#tcp-port-multiplexing)
-    * [Connecting to frps via PROXY](#connecting-to-frps-via-proxy)
     * [Port range mapping](#port-range-mapping)
     * [Client Plugins](#client-plugins)
     * [Server Manage Plugins](#server-manage-plugins)
@@ -624,32 +621,6 @@ Proxies and visitors managed through the Store are saved to disk and automatical
 
 When web server is enabled, frps will save monitor data in cache for 7 days. It will be cleared after process restart.
 
-Both frps and frpc support a separate `metricsServer` listener for health checks and optional profiling, without enabling the dashboard or admin API. It is disabled by default (`metricsServer.port = 0`) and binds to `127.0.0.1` unless configured otherwise.
-
-`/healthz` returns an empty HTTP 200 response without authentication. It checks that the HTTP server is responding; it does not indicate whether frpc is connected to frps or whether proxies are ready.
-
-#### Prometheus
-
-Configure a dedicated listener in `frps.toml`:
-
-```toml
-metricsServer.addr = "127.0.0.1"
-metricsServer.port = 7501
-metricsServer.user = "monitor"
-metricsServer.password = "change-me"
-# Optional TLS, independent of webServer:
-# metricsServer.tls.certFile = "metrics.crt"
-# metricsServer.tls.keyFile = "metrics.key"
-# Profiling is disabled unless explicitly enabled:
-# metricsServer.pprofEnable = true
-```
-
-Scrape `http://127.0.0.1:7501/metrics` using these Basic Auth credentials. This automatically enables frps business metrics, even when `webServer` is disabled and `enablePrometheus` is unset. Credentials and TLS are independent of `webServer`; when credentials are configured, both `/metrics` and profiling endpoints require authentication. `/healthz` remains anonymous.
-
-Set `metricsServer.pprofEnable = true` to expose `/debug/pprof/` and profiling endpoints on this listener. `/debug/pprof/cmdline` is excluded. frpc serves `/metrics` on this listener too, with Go runtime metrics only: no proxy, traffic or client data, and the same set of metrics on every platform.
-
-The `/healthz`, `/metrics`, and pprof endpoints on `webServer` are deprecated but remain available. `enablePrometheus = true` still enables the legacy frps `/metrics` endpoint on the dashboard listener. Migrate health probes, Prometheus scrapes, and profiling to `metricsServer`; the dashboard and admin APIs continue to use `webServer`.
-
 ### Authenticating the Client
 
 There are 2 authentication methods to authenticate frpc with frps. 
@@ -680,30 +651,6 @@ auth.tokenSource.file.path = "/path/to/token/file"
 ```
 
 The token will be read from the specified file at startup. This is useful for scenarios where tokens are managed by external systems or need to be kept separate from configuration files for security reasons.
-
-#### OIDC Authentication
-
-When specifying `auth.method = "oidc"` in `frpc.toml` and `frps.toml` - OIDC based authentication will be used.
-
-OIDC stands for OpenID Connect, and the flow used is called [Client Credentials Grant](https://tools.ietf.org/html/rfc6749#section-4.4).
-
-To use this authentication type - configure `frpc.toml` and `frps.toml` as follows:
-
-```toml
-# frps.toml
-auth.method = "oidc"
-auth.oidc.issuer = "https://example-oidc-issuer.com/"
-auth.oidc.audience = "https://oidc-audience.com/.default"
-```
-
-```toml
-# frpc.toml
-auth.method = "oidc"
-auth.oidc.clientID = "98692467-37de-409a-9fac-bb2585826f18" # Replace with OIDC client ID
-auth.oidc.clientSecret = "oidc_secret"
-auth.oidc.audience = "https://oidc-audience.com/.default"
-auth.oidc.tokenEndpointURL = "https://example-oidc-endpoint.com/oauth2/v2.0/token"
-```
 
 ### Encryption and Compression
 
@@ -740,7 +687,7 @@ transport.tls.trustedCaFile = "ca.crt"
 
 By default, when neither `transport.tls.trustedCaFile` nor `transport.tls.useSystemCa` is set, `frpc` does not verify the server certificate. Set `transport.tls.useSystemCa = true` to verify it using the host's system CAs. If `trustedCaFile` is also set, its CA certificates are added to the system CA pool; setting only `trustedCaFile` trusts only the CAs in that file. CA loading or certificate verification failures cause the connection to fail without falling back to another trust source or skipping verification.
 
-`useSystemCa` is supported only in `frpc`'s `transport.tls`, and requires `transport.tls.enable = true` unless `transport.protocol = "wss"`. With `wss`, the outer TLS connection is always enabled and verification applies to the TLS endpoint, which may be a reverse proxy. Setting `useSystemCa = true` in `frps`'s `transport.tls` or either process's `webServer.tls` or `metricsServer.tls` is a configuration error.
+`useSystemCa` is supported only in `frpc`'s `transport.tls`, and requires `transport.tls.enable = true` unless `transport.protocol = "wss"`. With `wss`, the outer TLS connection is always enabled and verification applies to the TLS endpoint, which may be a reverse proxy. Setting `useSystemCa = true` in `frps`'s `transport.tls` or either process's `webServer.tls` is a configuration error.
 
 **`frps` TLS settings:**
 
@@ -1251,19 +1198,6 @@ In the above configuration - frps can be contacted on port 1337 with a HTTP CONN
 CONNECT test1 HTTP/1.1\r\n\r\n
 ```
 and the connection will be routed to `proxy1`.
-
-### Connecting to frps via PROXY
-
-frpc can connect to frps through proxy if you set OS environment variable `HTTP_PROXY`, or if `transport.proxyURL` is set in frpc.toml file.
-
-It only works when protocol is tcp.
-
-```toml
-# frpc.toml
-serverAddr = "x.x.x.x"
-serverPort = 7000
-transport.proxyURL = "http://user:pwd@192.168.1.128:8080"
-```
 
 ### Port range mapping
 

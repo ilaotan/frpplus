@@ -39,76 +39,6 @@ func TestBuildV2ProxySpecAllTypesAndRedaction(t *testing.T) {
 			},
 			blockKeys: []string{"annotations", "loadBalancer", "metadatas", "remotePort", "transport"},
 		},
-		{
-			proxyType: "udp",
-			cfg: &v1.UDPProxyConfig{
-				ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "udp"),
-				RemotePort:      7000,
-			},
-			blockKeys: []string{"annotations", "loadBalancer", "metadatas", "remotePort", "transport"},
-		},
-		{
-			proxyType: "http",
-			cfg: &v1.HTTPProxyConfig{
-				ProxyBaseConfig:   newV2ProxyTestBaseConfig(t, "http"),
-				DomainConfig:      v1.DomainConfig{CustomDomains: []string{"app.example.com"}, SubDomain: "app"},
-				Locations:         []string{"/api"},
-				HTTPUser:          "secret-http-user",
-				HTTPPassword:      "secret-http-password",
-				HostHeaderRewrite: "backend.example.com",
-				RequestHeaders:    v1.HeaderOperations{Set: map[string]string{"X-Secret": "secret-request-header"}},
-				ResponseHeaders:   v1.HeaderOperations{Set: map[string]string{"X-Secret": "secret-response-header"}},
-				RouteByHTTPUser:   "secret-http-route-user",
-			},
-			blockKeys: []string{"annotations", "customDomains", "hostHeaderRewrite", "loadBalancer", "locations", "metadatas", "subdomain", "transport"},
-		},
-		{
-			proxyType: "https",
-			cfg: &v1.HTTPSProxyConfig{
-				ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "https"),
-				DomainConfig:    v1.DomainConfig{CustomDomains: []string{"secure.example.com"}, SubDomain: "secure"},
-			},
-			blockKeys: []string{"annotations", "customDomains", "loadBalancer", "metadatas", "subdomain", "transport"},
-		},
-		{
-			proxyType: "tcpmux",
-			cfg: &v1.TCPMuxProxyConfig{
-				ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "tcpmux"),
-				DomainConfig:    v1.DomainConfig{CustomDomains: []string{"mux.example.com"}, SubDomain: "mux"},
-				HTTPUser:        strings.Join([]string{"secret", "mux-http-user"}, "-"),
-				HTTPPassword:    strings.Join([]string{"secret", "mux-http-password"}, "-"),
-				RouteByHTTPUser: "displayed-mux-user",
-				Multiplexer:     "httpconnect",
-			},
-			blockKeys: []string{"annotations", "customDomains", "loadBalancer", "metadatas", "multiplexer", "routeByHTTPUser", "subdomain", "transport"},
-		},
-		{
-			proxyType: "stcp",
-			cfg: &v1.STCPProxyConfig{
-				ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "stcp"),
-				Secretkey:       strings.Join([]string{"secret", "stcp-key"}, "-"),
-				AllowUsers:      []string{strings.Join([]string{"secret", "stcp-user"}, "-")},
-			},
-			blockKeys: []string{"annotations", "loadBalancer", "metadatas", "transport"},
-		},
-		{
-			proxyType: "sudp",
-			cfg: &v1.SUDPProxyConfig{
-				ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "sudp"),
-				Secretkey:       strings.Join([]string{"secret", "sudp-key"}, "-"),
-				AllowUsers:      []string{strings.Join([]string{"secret", "sudp-user"}, "-")},
-			},
-			blockKeys: []string{"annotations", "loadBalancer", "metadatas", "transport"},
-		},
-		{
-			proxyType: "xtcp",
-			cfg: &v1.XTCPProxyConfig{
-				ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "xtcp"),
-				Secretkey:       strings.Join([]string{"secret", "xtcp-key"}, "-"),
-				AllowUsers:      []string{strings.Join([]string{"secret", "xtcp-user"}, "-")},
-			},
-			blockKeys: []string{"annotations", "loadBalancer", "metadatas", "transport"},
-		},
 	}
 
 	for _, tt := range tests {
@@ -181,41 +111,6 @@ func assertV2ProxyTypeFields(t *testing.T, proxyType string, raw json.RawMessage
 		if block.RemotePort == nil || *block.RemotePort != 6000 {
 			t.Fatalf("tcp remote port mismatch: %#v", block.RemotePort)
 		}
-	case "udp":
-		var block model.V2UDPProxySpec
-		if err := json.Unmarshal(raw, &block); err != nil {
-			t.Fatalf("unmarshal udp block failed: %v", err)
-		}
-		if block.RemotePort == nil || *block.RemotePort != 7000 {
-			t.Fatalf("udp remote port mismatch: %#v", block.RemotePort)
-		}
-	case "http":
-		var block model.V2HTTPProxySpec
-		if err := json.Unmarshal(raw, &block); err != nil {
-			t.Fatalf("unmarshal http block failed: %v", err)
-		}
-		if len(block.CustomDomains) != 1 || block.CustomDomains[0] != "app.example.com" ||
-			block.Subdomain != "app" || len(block.Locations) != 1 || block.Locations[0] != "/api" ||
-			block.HostHeaderRewrite != "backend.example.com" {
-			t.Fatalf("http fields mismatch: %#v", block)
-		}
-	case "https":
-		var block model.V2HTTPSProxySpec
-		if err := json.Unmarshal(raw, &block); err != nil {
-			t.Fatalf("unmarshal https block failed: %v", err)
-		}
-		if len(block.CustomDomains) != 1 || block.CustomDomains[0] != "secure.example.com" || block.Subdomain != "secure" {
-			t.Fatalf("https fields mismatch: %#v", block)
-		}
-	case "tcpmux":
-		var block model.V2TCPMuxProxySpec
-		if err := json.Unmarshal(raw, &block); err != nil {
-			t.Fatalf("unmarshal tcpmux block failed: %v", err)
-		}
-		if len(block.CustomDomains) != 1 || block.CustomDomains[0] != "mux.example.com" ||
-			block.Subdomain != "mux" || block.Multiplexer != "httpconnect" || block.RouteByHTTPUser != "displayed-mux-user" {
-			t.Fatalf("tcpmux fields mismatch: %#v", block)
-		}
 	}
 }
 
@@ -238,20 +133,6 @@ func TestBuildV2ProxyRespOfflineTypedShells(t *testing.T) {
 			assertRawJSONKeysFromMessage(t, specObject[proxyType])
 		})
 	}
-}
-
-func TestBuildV2ProxySpecDoesNotPopulateMismatchedBlock(t *testing.T) {
-	spec := buildV2ProxySpec("tcp", &v1.UDPProxyConfig{
-		ProxyBaseConfig: newV2ProxyTestBaseConfig(t, "udp"),
-		RemotePort:      7000,
-	})
-
-	var specObject map[string]json.RawMessage
-	if err := json.Unmarshal(mustMarshalJSON(t, spec), &specObject); err != nil {
-		t.Fatalf("unmarshal mismatched spec failed: %v", err)
-	}
-	assertRawJSONKeys(t, specObject, "tcp", "type")
-	assertRawJSONKeysFromMessage(t, specObject["tcp"])
 }
 
 func newV2ProxyTestBaseConfig(t *testing.T, proxyType string) v1.ProxyBaseConfig {
@@ -286,14 +167,6 @@ func newV2ProxyTestBaseConfig(t *testing.T, proxyType string) v1.ProxyBaseConfig
 		ProxyBackend: v1.ProxyBackend{
 			LocalIP:   "secret-local-host",
 			LocalPort: 8080,
-			Plugin: v1.TypedClientPluginOptions{
-				Type: v1.PluginHTTPProxy,
-				ClientPluginOptions: &v1.HTTPProxyPluginOptions{
-					Type:         v1.PluginHTTPProxy,
-					HTTPUser:     "secret-plugin-user",
-					HTTPPassword: "secret-plugin-password",
-				},
-			},
 		},
 	}
 }

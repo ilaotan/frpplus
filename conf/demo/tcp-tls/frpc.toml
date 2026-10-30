@@ -1,0 +1,50 @@
+# frpc.toml — 与 frps.toml 配套的 TCP 代理客户端（TLS 双向认证）
+#
+# 两个代理都是 type = "tcp"：
+#   ssh  127.0.0.1:22   -> frps:6001
+#   web  127.0.0.1:8080 -> frps:6002
+# 访问方式：ssh -p 6001 user@<frps 地址>；浏览器打开 http://<frps 地址>:6002
+
+serverAddr = "127.0.0.1"
+serverPort = 7000
+
+auth.method = "token"
+auth.token = "change-me-please"
+
+# 自 v0.50.0 起默认就是 true，这里显式写出来便于阅读。
+transport.tls.enable = true
+
+# 客户端证书：frps 配了 trustedCaFile 时，必须提供，否则握手失败。
+transport.tls.certFile = "./certs/client.crt"
+transport.tls.keyFile = "./certs/client.key"
+
+# 用同一个 CA 校验 frps 的证书。不配这一项时 frpc 会跳过校验（InsecureSkipVerify）。
+transport.tls.trustedCaFile = "./certs/ca.crt"
+
+# 必须与 server.crt 的 SAN 完全一致：
+#   - 用 IP 访问就写 IP（证书 SAN 里要有 IP:127.0.0.1 或对应内网 IP）
+#   - 用域名访问就写域名（证书 SAN 里要有 DNS:frp.example.com）
+# 写错会报 certificate is valid for ..., not ...
+transport.tls.serverName = "127.0.0.1"
+
+# 默认 true。设为 false 时会先发一个自定义字节（0x17）再握手，
+# 用于和某些只认该特征的旧版 frps 或负载均衡共存，新部署不用改。
+# transport.tls.disableCustomTLSFirstByte = true
+
+[[proxies]]
+name = "ssh"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 22
+remotePort = 6001
+
+[[proxies]]
+name = "web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 8080
+remotePort = 6002
+
+# 需要更严格的隧道内加密（防止 frps 侧看到明文业务数据）时，按代理开启：
+# transport.useEncryption = true
+# 它用 token 派生的密钥加密该代理的数据，和上面的 TLS 是两层，互不替代。

@@ -55,14 +55,6 @@ func TestWorkConnStartWritesStartWorkConn(t *testing.T) {
 	require.Same(t, serverMsgConn, result.conn)
 }
 
-func TestGetWorkConnFromPoolStartWorkConnUnchangedForUDPWireV2(t *testing.T) {
-	startMsg := getStartWorkConnFromPool(t, &v1.UDPProxyConfig{
-		ProxyBaseConfig: v1.ProxyBaseConfig{Name: "udp", Type: string(v1.ProxyTypeUDP)},
-	}, wire.ProtocolV2)
-
-	require.Equal(t, msg.StartWorkConn{ProxyName: "udp"}, startMsg)
-}
-
 func TestGetWorkConnFromPoolLeavesRawTCPPayloadUnframed(t *testing.T) {
 	startMsg := getStartWorkConnFromPool(t, &v1.TCPProxyConfig{
 		ProxyBaseConfig: v1.ProxyBaseConfig{Name: "tcp", Type: string(v1.ProxyTypeTCP)},

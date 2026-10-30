@@ -31,21 +31,7 @@ type AuthMethod string
 
 const (
 	AuthMethodToken AuthMethod = "token"
-	AuthMethodOIDC  AuthMethod = "oidc"
 )
-
-// QUIC protocol options
-type QUICOptions struct {
-	KeepalivePeriod    int `json:"keepalivePeriod,omitempty"`
-	MaxIdleTimeout     int `json:"maxIdleTimeout,omitempty"`
-	MaxIncomingStreams int `json:"maxIncomingStreams,omitempty"`
-}
-
-func (c *QUICOptions) Complete() {
-	c.KeepalivePeriod = util.EmptyOr(c.KeepalivePeriod, 10)
-	c.MaxIdleTimeout = util.EmptyOr(c.MaxIdleTimeout, 30)
-	c.MaxIncomingStreams = util.EmptyOr(c.MaxIncomingStreams, 100000)
-}
 
 type WebServerConfig struct {
 	// This is the network address to bind on for serving the web interface and API.
@@ -72,26 +58,6 @@ func (c *WebServerConfig) Complete() {
 	c.Addr = util.EmptyOr(c.Addr, "127.0.0.1")
 }
 
-// MetricsServerConfig configures a separate listener for health checks, metrics
-// (frps only), and optional pprof handlers. It does not serve the web interface.
-type MetricsServerConfig struct {
-	// Addr defaults to "127.0.0.1".
-	Addr string `json:"addr,omitempty"`
-	// Port disables the listener when set to 0.
-	Port int `json:"port,omitempty"`
-	// User and Password protect metrics and pprof; health checks remain anonymous.
-	User     string `json:"user,omitempty"`
-	Password string `json:"password,omitempty"`
-	// PprofEnable explicitly enables profiling, excluding cmdline.
-	PprofEnable bool `json:"pprofEnable,omitempty"`
-	// Enable TLS if TLS is not nil.
-	TLS *TLSConfig `json:"tls,omitempty"`
-}
-
-func (c *MetricsServerConfig) Complete() {
-	c.Addr = util.EmptyOr(c.Addr, "127.0.0.1")
-}
-
 type TLSConfig struct {
 	// CertFile specifies the path of the cert file that client will load.
 	CertFile string `json:"certFile,omitempty"`
@@ -106,22 +72,6 @@ type TLSConfig struct {
 	// ServerName specifies the custom server name of tls certificate. By
 	// default, server name if same to ServerAddr.
 	ServerName string `json:"serverName,omitempty"`
-}
-
-// NatTraversalConfig defines configuration options for NAT traversal
-type NatTraversalConfig struct {
-	// DisableAssistedAddrs disables the use of local network interfaces
-	// for assisted connections during NAT traversal. When enabled,
-	// only STUN-discovered public addresses will be used.
-	DisableAssistedAddrs bool `json:"disableAssistedAddrs,omitempty"`
-}
-
-func (c *NatTraversalConfig) Clone() *NatTraversalConfig {
-	if c == nil {
-		return nil
-	}
-	out := *c
-	return &out
 }
 
 type LogConfig struct {
@@ -144,14 +94,6 @@ func (c *LogConfig) Complete() {
 	c.To = util.EmptyOr(c.To, "console")
 	c.Level = util.EmptyOr(c.Level, "info")
 	c.MaxDays = util.EmptyOr(c.MaxDays, 3)
-}
-
-type HTTPPluginOptions struct {
-	Name      string   `json:"name"`
-	Addr      string   `json:"addr"`
-	Path      string   `json:"path"`
-	Ops       []string `json:"ops"`
-	TLSVerify bool     `json:"tlsVerify,omitempty"`
 }
 
 type HeaderOperations struct {

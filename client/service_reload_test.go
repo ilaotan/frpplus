@@ -117,13 +117,9 @@ func TestServiceReloadDuringControlHandoff(t *testing.T) {
 				started: make(chan struct{}),
 				resume:  make(chan struct{}),
 			}
-			oldVisitor := &v1.STCPVisitorConfig{VisitorBaseConfig: v1.VisitorBaseConfig{
-				Name: "visitor", Type: "stcp", BindPort: -1, ServerName: "old-target",
-			}}
 			// Seed the desired config for the next connection without restarting
 			// proxies on the already closed control.
 			svr.proxyCfgs = []v1.ProxyConfigurer{oldProxy}
-			svr.visitorCfgs = []v1.VisitorConfigurer{oldVisitor}
 			loginDone, updateDone := make(chan struct{}), make(chan struct{})
 			resume := sync.OnceFunc(func() { close(oldProxy.resume) })
 			t.Cleanup(func() {
@@ -149,16 +145,13 @@ func TestServiceReloadDuringControlHandoff(t *testing.T) {
 				ProxyBaseConfig: v1.ProxyBaseConfig{Name: "proxy", Type: "tcp"},
 				RemotePort:      18002,
 			}
-			newVisitor := &v1.STCPVisitorConfig{VisitorBaseConfig: v1.VisitorBaseConfig{
-				Name: "visitor", Type: "stcp", BindPort: -1, ServerName: "new-target",
-			}}
 			var updateErr error
 			go func() {
-				proxies, visitors := []v1.ProxyConfigurer{newProxy}, []v1.VisitorConfigurer{newVisitor}
+				proxies := []v1.ProxyConfigurer{newProxy}
 				if updateSource {
-					updateErr = svr.UpdateConfigSource(svr.common, proxies, visitors)
+					updateErr = svr.UpdateConfigSource(svr.common, proxies)
 				} else {
-					updateErr = svr.UpdateAllConfigurer(proxies, visitors)
+					updateErr = svr.UpdateAllConfigurer(proxies)
 				}
 				close(updateDone)
 			}()
@@ -183,9 +176,6 @@ func TestServiceReloadDuringControlHandoff(t *testing.T) {
 			status, ok := svr.getProxyStatus("proxy")
 			require.True(t, ok)
 			require.Equal(t, 18002, status.Cfg.(*v1.TCPProxyConfig).RemotePort)
-			visitor, ok := svr.getVisitorCfg("visitor")
-			require.True(t, ok)
-			require.Equal(t, "new-target", visitor.GetBaseConfig().ServerName)
 		})
 	}
 }
@@ -214,7 +204,7 @@ func TestServiceReloadWhileLoginPending(t *testing.T) {
 	updateDone := make(chan struct{})
 	var updateErr error
 	go func() {
-		updateErr = svr.UpdateAllConfigurer([]v1.ProxyConfigurer{proxyCfg}, nil)
+		updateErr = svr.UpdateAllConfigurer([]v1.ProxyConfigurer{proxyCfg})
 		close(updateDone)
 	}()
 	t.Cleanup(func() {

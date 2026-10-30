@@ -15,15 +15,12 @@
 package server
 
 import (
-	"bytes"
 	"context"
 	"crypto/tls"
 	"errors"
 	"fmt"
 	"io"
 	"net"
-	"net/http"
-	"os"
 	"strconv"
 	"sync"
 	"time"
@@ -31,27 +28,19 @@ import (
 	"github.com/fatedier/golib/crypto"
 	"github.com/fatedier/golib/net/mux"
 	fmux "github.com/fatedier/yamux"
-	"github.com/prometheus/client_golang/prometheus/promhttp"
-	quic "github.com/quic-go/quic-go"
 	"github.com/samber/lo"
 
 	"github.com/fatedier/frp/pkg/auth"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/config/v1/validation"
-	modelmetrics "github.com/fatedier/frp/pkg/metrics"
 	"github.com/fatedier/frp/pkg/msg"
-	"github.com/fatedier/frp/pkg/nathole"
-	plugin "github.com/fatedier/frp/pkg/plugin/server"
 	"github.com/fatedier/frp/pkg/proto/wire"
-	"github.com/fatedier/frp/pkg/ssh"
 	"github.com/fatedier/frp/pkg/transport"
 	httppkg "github.com/fatedier/frp/pkg/util/http"
 	"github.com/fatedier/frp/pkg/util/log"
 	netpkg "github.com/fatedier/frp/pkg/util/net"
-	"github.com/fatedier/frp/pkg/util/tcpmux"
 	"github.com/fatedier/frp/pkg/util/util"
 	"github.com/fatedier/frp/pkg/util/version"
-	"github.com/fatedier/frp/pkg/util/vhost"
 	"github.com/fatedier/frp/pkg/util/xlog"
 	"github.com/fatedier/frp/server/controller"
 	"github.com/fatedier/frp/server/group"
@@ -59,25 +48,17 @@ import (
 	"github.com/fatedier/frp/server/ports"
 	"github.com/fatedier/frp/server/proxy"
 	"github.com/fatedier/frp/server/registry"
-	"github.com/fatedier/frp/server/visitor"
 )
 
 const (
-	connReadTimeout       time.Duration = 10 * time.Second
-	connWriteTimeout      time.Duration = 5 * time.Second
-	vhostReadWriteTimeout time.Duration = 30 * time.Second
+	connReadTimeout  time.Duration = 10 * time.Second
+	connWriteTimeout time.Duration = 5 * time.Second
 )
 
 var errControlReplaced = errors.New("control was replaced during login")
 
 func init() {
 	crypto.DefaultSalt = "frp"
-	// Disable quic-go's receive buffer warning.
-	os.Setenv("QUIC_GO_DISABLE_RECEIVE_BUFFER_WARNING", "true")
-	// Disable quic-go's ECN support by default. It may cause issues on certain operating systems.
-	if os.Getenv("QUIC_GO_DISABLE_ECN") == "" {
-		os.Setenv("QUIC_GO_DISABLE_ECN", "true")
-	}
 }
 
 // Server service
@@ -88,20 +69,8 @@ type Service struct {
 	// Accept connections from client
 	listener net.Listener
 
-	// Accept connections using kcp
-	kcpListener net.Listener
-
-	// Accept connections using quic
-	quicListener *quic.Listener
-
-	// Accept connections using websocket
-	websocketListener net.Listener
-
 	// Accept frp tls connections
 	tlsListener net.Listener
-
-	// Accept pipe connections from ssh tunnel gateway
-	sshTunnelListener *netpkg.InternalListener
 
 	// Manage all controllers
 	ctlManager *ControlManager
@@ -112,26 +81,14 @@ type Service struct {
 	// Manage all proxies
 	pxyManager *proxy.Manager
 
-	// Manage all plugins
-	pluginManager *plugin.Manager
-
 	// IP access control for tcp user connections
 	ipAccessCtl *ipaccess.Controller
-
-	// HTTP vhost router
-	httpVhostRouter *vhost.Routers
 
 	// All resource managers and controllers
 	rc *controller.ResourceController
 
 	// web server for dashboard UI and apis
-	webServer     *httppkg.Server
-	metricsServer *httppkg.Server
-	// HTTP vhost resources are started and owned by NewService.
-	httpVhostServer   *http.Server
-	httpVhostListener net.Listener
-
-	sshTunnelGateway *ssh.Gateway
+	webServer *httppkg.Server
 
 	// Auth runtime and encryption materials
 	auth *auth.ServerAuth
@@ -168,61 +125,11 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		ctlManager:     NewControlManager(clientRegistry),
 		clientRegistry: clientRegistry,
 		pxyManager:     proxy.NewManager(),
-		pluginManager:  plugin.NewManager(),
-		rc: &controller.ResourceController{
-			VisitorManager: visitor.NewManager(),
-		},
-		sshTunnelListener: netpkg.NewInternalListener(),
-		httpVhostRouter:   vhost.NewRouters(),
-		auth:              authRuntime,
-		tlsConfig:         tlsConfig,
-		cfg:               cfg,
-		ctx:               context.Background(),
-	}
-
-	// Create tcpmux httpconnect multiplexer.
-	if cfg.TCPMuxHTTPConnectPort > 0 {
-		var l net.Listener
-		address := net.JoinHostPort(cfg.ProxyBindAddr, strconv.Itoa(cfg.TCPMuxHTTPConnectPort))
-		l, err = net.Listen("tcp", address)
-		if err != nil {
-			return nil, fmt.Errorf("create server listener error, %v", err)
-		}
-
-		svr.rc.TCPMuxHTTPConnectMuxer, err = tcpmux.NewHTTPConnectTCPMuxer(l, cfg.TCPMuxPassthrough, vhostReadWriteTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("create vhost tcpMuxer error, %v", err)
-		}
-		log.Infof("tcpmux httpconnect multiplexer listen on %s, passthrough: %v", address, cfg.TCPMuxPassthrough)
-	}
-
-	// Init all plugins
-	for _, p := range cfg.HTTPPlugins {
-		svr.pluginManager.Register(plugin.NewHTTPPluginOptions(p))
-		log.Infof("plugin [%s] has been registered", p.Name)
-	}
-	svr.rc.PluginManager = svr.pluginManager
-
-	// Init HTTP group controller
-	svr.rc.HTTPGroupCtl = group.NewHTTPGroupController(svr.httpVhostRouter)
-
-	// Init TCP mux group controller
-	svr.rc.TCPMuxGroupCtl = group.NewTCPMuxGroupCtl(svr.rc.TCPMuxHTTPConnectMuxer)
-
-	// Init 404 not found page
-	vhost.NotFoundPagePath = cfg.Custom404Page
-
-	var (
-		httpMuxOn  bool
-		httpsMuxOn bool
-	)
-	if cfg.BindAddr == cfg.ProxyBindAddr {
-		if cfg.BindPort == cfg.VhostHTTPPort {
-			httpMuxOn = true
-		}
-		if cfg.BindPort == cfg.VhostHTTPSPort {
-			httpsMuxOn = true
-		}
+		rc:             &controller.ResourceController{},
+		auth:           authRuntime,
+		tlsConfig:      tlsConfig,
+		cfg:            cfg,
+		ctx:            context.Background(),
 	}
 
 	// Listen for accepting connections from client.
@@ -242,129 +149,11 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 	svr.listener = ln
 	log.Infof("frps tcp listen on %s", address)
 
-	// Listen for accepting connections from client using kcp protocol.
-	if cfg.KCPBindPort > 0 {
-		address := net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.KCPBindPort))
-		svr.kcpListener, err = netpkg.ListenKcp(address)
-		if err != nil {
-			return nil, fmt.Errorf("listen on kcp udp address %s error: %v", address, err)
-		}
-		log.Infof("frps kcp listen on udp %s", address)
-	}
-
-	if cfg.QUICBindPort > 0 {
-		address := net.JoinHostPort(cfg.BindAddr, strconv.Itoa(cfg.QUICBindPort))
-		quicTLSCfg := tlsConfig.Clone()
-		quicTLSCfg.NextProtos = []string{"frp"}
-		svr.quicListener, err = quic.ListenAddr(address, quicTLSCfg, &quic.Config{
-			MaxIdleTimeout:     time.Duration(cfg.Transport.QUIC.MaxIdleTimeout) * time.Second,
-			MaxIncomingStreams: int64(cfg.Transport.QUIC.MaxIncomingStreams),
-			KeepAlivePeriod:    time.Duration(cfg.Transport.QUIC.KeepalivePeriod) * time.Second,
-		})
-		if err != nil {
-			return nil, fmt.Errorf("listen on quic udp address %s error: %v", address, err)
-		}
-		log.Infof("frps quic listen on %s", address)
-	}
-
-	if cfg.SSHTunnelGateway.BindPort > 0 {
-		sshGateway, err := ssh.NewGateway(cfg.SSHTunnelGateway, cfg.BindAddr, svr.sshTunnelListener)
-		if err != nil {
-			return nil, fmt.Errorf("create ssh gateway error: %v", err)
-		}
-		svr.sshTunnelGateway = sshGateway
-		log.Infof("frps sshTunnelGateway listen on port %d", cfg.SSHTunnelGateway.BindPort)
-	}
-
-	// Listen for accepting connections from client using websocket protocol.
-	websocketPrefix := []byte("GET " + netpkg.FrpWebsocketPath)
-	websocketLn := svr.muxer.Listen(0, uint32(len(websocketPrefix)), func(data []byte) bool {
-		return bytes.Equal(data, websocketPrefix)
-	})
-	svr.websocketListener = netpkg.NewWebsocketListener(websocketLn)
-
-	// Create http vhost muxer.
-	if cfg.VhostHTTPPort > 0 {
-		rp := vhost.NewHTTPReverseProxy(vhost.HTTPReverseProxyOptions{
-			ResponseHeaderTimeoutS: cfg.VhostHTTPTimeout,
-			// The controller is created later in the startup sequence, so the
-			// lookup happens per request instead of being captured here.
-			CheckUserConn: func(proxyName, remoteAddr string) error {
-				ctl := svr.rc.IPAccessController
-				if ctl == nil {
-					return nil
-				}
-				decision := ctl.Check(string(v1.ProxyTypeHTTP), proxyName, remoteAddr)
-				if decision.Allowed {
-					return nil
-				}
-				return errors.New(decision.Reason)
-			},
-		}, svr.httpVhostRouter)
-		svr.rc.HTTPReverseProxy = rp
-
-		address := net.JoinHostPort(cfg.ProxyBindAddr, strconv.Itoa(cfg.VhostHTTPPort))
-		protocols := new(http.Protocols)
-		protocols.SetHTTP1(true)
-		protocols.SetUnencryptedHTTP2(true)
-		server := &http.Server{
-			Addr:              address,
-			Handler:           rp,
-			ReadHeaderTimeout: 60 * time.Second,
-			Protocols:         protocols,
-		}
-		var l net.Listener
-		if httpMuxOn {
-			l = svr.muxer.ListenHTTP(1)
-		} else {
-			l, err = net.Listen("tcp", address)
-			if err != nil {
-				return nil, fmt.Errorf("create vhost http listener error, %v", err)
-			}
-		}
-		svr.httpVhostServer = server
-		svr.httpVhostListener = l
-		go func() {
-			_ = server.Serve(l)
-		}()
-		log.Infof("http service listen on %s", address)
-	}
-
-	// Create https vhost muxer.
-	if cfg.VhostHTTPSPort > 0 {
-		var l net.Listener
-		if httpsMuxOn {
-			l = svr.muxer.ListenHTTPS(1)
-		} else {
-			address := net.JoinHostPort(cfg.ProxyBindAddr, strconv.Itoa(cfg.VhostHTTPSPort))
-			l, err = net.Listen("tcp", address)
-			if err != nil {
-				return nil, fmt.Errorf("create server listener error, %v", err)
-			}
-			log.Infof("https service listen on %s", address)
-		}
-
-		svr.rc.VhostHTTPSMuxer, err = vhost.NewHTTPSMuxer(l, vhostReadWriteTimeout)
-		if err != nil {
-			return nil, fmt.Errorf("create vhost httpsMuxer error, %v", err)
-		}
-
-		// Init HTTPS group controller after HTTPSMuxer is created
-		svr.rc.HTTPSGroupCtl = group.NewHTTPSGroupController(svr.rc.VhostHTTPSMuxer)
-	}
-
 	// frp tls listener
 	svr.tlsListener = svr.muxer.Listen(2, 1, func(data []byte) bool {
 		// tls first byte can be 0x16 only when vhost https port is not same with bind port
 		return int(data[0]) == netpkg.FRPTLSHeadByte || int(data[0]) == 0x16
 	})
-
-	// Create nat hole controller.
-	nc, err := nathole.NewController(time.Duration(cfg.NatHoleAnalysisDataReserveHours) * time.Hour)
-	if err != nil {
-		return nil, fmt.Errorf("create nat hole controller error, %v", err)
-	}
-	svr.rc.NatHoleController = nc
 
 	// Create ip access controller for the user connections of tcp proxies.
 	if cfg.IPAccessControl.Enable {
@@ -378,8 +167,8 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		log.Infof("ip access control enabled, store: %s", cfg.IPAccessControl.StorePath)
 	}
 
-	// Create HTTP servers after all other fallible steps, rolling back listeners
-	// if either server cannot be created.
+	// Create HTTP server after all other fallible steps, rolling back listeners
+	// if it cannot be created.
 	if cfg.WebServer.Port > 0 {
 		ws, err := httppkg.NewServer(cfg.WebServer)
 		if err != nil {
@@ -389,44 +178,15 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		}
 		svr.webServer = ws
 	}
-	if cfg.MetricsServer.Port > 0 {
-		ms, err := httppkg.NewMetricsServer(cfg.MetricsServer, promhttp.Handler())
-		if err != nil {
-			_ = svr.Close()
-			return nil, err
-		}
-		svr.metricsServer = ms
-	}
-
-	// Collectors are enabled at most once. The in-memory collector is only read
-	// by the dashboard API, and Prometheus metrics need an endpoint to serve them.
-	enableMem, enablePrometheus := metricsCollectors(cfg)
-	if enableMem {
-		modelmetrics.EnableMem()
-	}
-	if enablePrometheus {
-		modelmetrics.EnablePrometheus()
-	}
 
 	// Start port-manager cleanup workers only after all fallible steps have succeeded.
 	svr.rc.TCPPortManager = ports.NewManager("tcp", cfg.ProxyBindAddr, cfg.AllowPorts)
-	svr.rc.UDPPortManager = ports.NewManager("udp", cfg.ProxyBindAddr, cfg.AllowPorts)
 	svr.rc.TCPGroupCtl = group.NewTCPGroupCtl(svr.rc.TCPPortManager)
 
 	if svr.webServer != nil {
 		svr.webServer.RouteRegister(svr.registerRouteHandlers)
 	}
 	return svr, nil
-}
-
-// metricsCollectors reports which collectors should be started for cfg. The
-// in-memory collector only backs the dashboard API (webServer), while the
-// Prometheus collector needs a listener that serves /metrics: either the new
-// metricsServer, or the legacy webServer endpoint gated by enablePrometheus.
-func metricsCollectors(cfg *v1.ServerConfig) (mem bool, prometheus bool) {
-	mem = cfg.WebServer.Port > 0
-	prometheus = cfg.MetricsServer.Port > 0 || (cfg.EnablePrometheus && mem)
-	return mem, prometheus
 }
 
 func (svr *Service) Run(ctx context.Context) {
@@ -450,15 +210,6 @@ func (svr *Service) Run(ctx context.Context) {
 
 	// run dashboard web server.
 	if svr.webServer != nil {
-		if svr.cfg.WebServer.PprofEnable {
-			log.Warnf("webServer pprof endpoints are deprecated; use metricsServer.pprofEnable instead")
-		}
-		if svr.cfg.EnablePrometheus {
-			log.Warnf("webServer /metrics is deprecated; configure metricsServer.port instead")
-		}
-		if svr.cfg.MetricsServer.Port == 0 {
-			log.Infof("webServer /healthz is deprecated; health probes can migrate to metricsServer.port")
-		}
 		go func() {
 			log.Infof("dashboard listen on %s", svr.webServer.Address())
 			if err := svr.webServer.Run(); err != nil {
@@ -467,33 +218,7 @@ func (svr *Service) Run(ctx context.Context) {
 		}()
 	}
 
-	if svr.metricsServer != nil {
-		go func() {
-			log.Infof("metrics server listen on %s", svr.metricsServer.Address())
-			if err := svr.metricsServer.Run(); err != nil && !errors.Is(err, http.ErrServerClosed) {
-				log.Warnf("metrics server exit with error: %v", err)
-			}
-		}()
-	}
-
-	go svr.HandleListener(svr.sshTunnelListener, true)
-
-	if svr.kcpListener != nil {
-		go svr.HandleListener(svr.kcpListener, false)
-	}
-	if svr.quicListener != nil {
-		go svr.HandleQUICListener(svr.quicListener)
-	}
-	go svr.HandleListener(svr.websocketListener, false)
 	go svr.HandleListener(svr.tlsListener, false)
-
-	if svr.rc.NatHoleController != nil {
-		go svr.rc.NatHoleController.CleanWorker(svr.ctx)
-	}
-
-	if svr.sshTunnelGateway != nil {
-		go svr.sshTunnelGateway.Run()
-	}
 
 	svr.HandleListener(svr.listener, false)
 
@@ -513,37 +238,14 @@ func (svr *Service) Close() error {
 }
 
 func (svr *Service) closeResources() {
-	if svr.kcpListener != nil {
-		svr.kcpListener.Close()
-	}
-	if svr.quicListener != nil {
-		svr.quicListener.Close()
-	}
-	if svr.websocketListener != nil {
-		svr.websocketListener.Close()
-	}
 	if svr.tlsListener != nil {
 		svr.tlsListener.Close()
-	}
-	if svr.sshTunnelListener != nil {
-		svr.sshTunnelListener.Close()
 	}
 	if svr.listener != nil {
 		svr.listener.Close()
 	}
 	if svr.webServer != nil {
 		svr.webServer.Close()
-	}
-	if svr.metricsServer != nil {
-		svr.metricsServer.Close()
-	}
-	if svr.httpVhostServer != nil {
-		svr.httpVhostServer.Close()
-		// Close even if Serve has not registered its listener yet.
-		svr.httpVhostListener.Close()
-	}
-	if svr.sshTunnelGateway != nil {
-		svr.sshTunnelGateway.Close()
 	}
 	if svr.ipAccessCtl != nil {
 		if err := svr.ipAccessCtl.Close(); err != nil {
@@ -555,7 +257,7 @@ func (svr *Service) closeResources() {
 	svr.ctlManager.Close()
 }
 
-func (svr *Service) handleConnection(ctx context.Context, conn net.Conn, internal bool) {
+func (svr *Service) handleConnection(ctx context.Context, conn net.Conn) {
 	xl := xlog.FromContextSafe(ctx)
 
 	acceptedConn, err := svr.acceptConnection(ctx, conn)
@@ -568,26 +270,15 @@ func (svr *Service) handleConnection(ctx context.Context, conn net.Conn, interna
 
 	switch m := acceptedConn.firstMsg.(type) {
 	case *msg.Login:
-		// server plugin hook
-		content := &plugin.LoginContent{
-			Login:         *m,
-			ClientAddress: conn.RemoteAddr().String(),
-		}
-		retContent, err := svr.pluginManager.Login(content)
 		var ctl *Control
+		controlConn := acceptedConn.conn
+		var controlRW io.ReadWriter
+		controlRW, err = acceptedConn.newControlReadWriter(conn, svr.auth.EncryptionKey())
 		if err == nil {
-			m = &retContent.Login
-			controlConn := acceptedConn.conn
-			if !internal {
-				var controlRW io.ReadWriter
-				controlRW, err = acceptedConn.newControlReadWriter(conn, svr.auth.EncryptionKey())
-				if err == nil {
-					controlConn = acceptedConn.messageConnFor(controlRW)
-				}
-			}
-			if err == nil {
-				ctl, err = svr.RegisterControl(controlConn, m, internal, acceptedConn.wireProtocol, acceptedConn.udpPacketCodec)
-			}
+			controlConn = acceptedConn.messageConnFor(controlRW)
+		}
+		if err == nil {
+			ctl, err = svr.RegisterControl(controlConn, m, acceptedConn.wireProtocol)
 		}
 
 		if err != nil {
@@ -636,20 +327,6 @@ func (svr *Service) handleConnection(ctx context.Context, conn net.Conn, interna
 			})
 			conn.Close()
 		}
-	case *msg.NewVisitorConn:
-		if err = svr.RegisterVisitorConn(conn, m, acceptedConn.wireProtocol); err != nil {
-			xl.Warnf("register visitor conn error: %v", err)
-			_ = acceptedConn.conn.WriteMsg(&msg.NewVisitorConnResp{
-				ProxyName: m.ProxyName,
-				Error:     util.GenerateResponseErrorString("register visitor conn error", err, lo.FromPtr(svr.cfg.DetailedErrorsToClient)),
-			})
-			conn.Close()
-		} else {
-			_ = acceptedConn.conn.WriteMsg(&msg.NewVisitorConnResp{
-				ProxyName: m.ProxyName,
-				Error:     "",
-			})
-		}
 	default:
 		log.Warnf("error message type for the new connection [%s]", conn.RemoteAddr().String())
 		conn.Close()
@@ -671,7 +348,6 @@ type acceptedConnection struct {
 	conn               *msg.Conn
 	wireProtocol       string
 	clientHelloPresent bool
-	udpPacketCodec     string
 	cryptoContext      *wire.CryptoContext
 	firstMsg           msg.Message
 }
@@ -790,13 +466,10 @@ func (ac *acceptedConnection) handleClientHello(conn net.Conn, wireConn *wire.Co
 		return fmt.Errorf("write ServerHello: %w", err)
 	}
 	ac.cryptoContext = cryptoContext
-	ac.udpPacketCodec = serverHello.Selected.Message.UDPPacketCodec
 	return nil
 }
 
 // HandleListener accepts connections from client and call handleConnection to handle them.
-// If internal is true, it means that this listener is used for internal communication like ssh tunnel gateway.
-// TODO(fatedier): Pass some parameters of listener/connection through context to avoid passing too many parameters.
 func (svr *Service) HandleListener(l net.Listener, internal bool) {
 	// Listen for incoming connections from client.
 	for {
@@ -847,54 +520,22 @@ func (svr *Service) HandleListener(l net.Listener, internal bool) {
 						session.Close()
 						return
 					}
-					go svr.handleConnection(ctx, stream, internal)
+					go svr.handleConnection(ctx, stream)
 				}
 			} else {
-				svr.handleConnection(ctx, frpConn, internal)
+				svr.handleConnection(ctx, frpConn)
 			}
 		}(ctx, c)
-	}
-}
-
-func (svr *Service) HandleQUICListener(l *quic.Listener) {
-	// Listen for incoming connections from client.
-	for {
-		c, err := l.Accept(context.Background())
-		if err != nil {
-			log.Warnf("quic listener for incoming connections from client closed")
-			return
-		}
-		// Start a new goroutine to handle connection.
-		go func(ctx context.Context, frpConn *quic.Conn) {
-			for {
-				stream, err := frpConn.AcceptStream(context.Background())
-				if err != nil {
-					log.Debugf("accept new quic mux stream error: %v", err)
-					_ = frpConn.CloseWithError(0, "")
-					return
-				}
-				go svr.handleConnection(ctx, netpkg.QuicStreamToNetConn(stream, frpConn), false)
-			}
-		}(context.Background(), c)
 	}
 }
 
 func (svr *Service) RegisterControl(
 	ctlConn *msg.Conn,
 	loginMsg *msg.Login,
-	internal bool,
 	wireProtocol string,
-	udpPacketCodec string,
 ) (*Control, error) {
 	switch wireProtocol {
-	case wire.ProtocolV1:
-		if udpPacketCodec != "" {
-			return nil, fmt.Errorf("UDP packet codec %q requires wire protocol v2", udpPacketCodec)
-		}
-	case wire.ProtocolV2:
-		if udpPacketCodec != "" && udpPacketCodec != wire.UDPPacketCodecBinary {
-			return nil, fmt.Errorf("unsupported UDP packet codec selection: %s", udpPacketCodec)
-		}
+	case wire.ProtocolV1, wire.ProtocolV2:
 	default:
 		return nil, fmt.Errorf("unsupported wire protocol: %s", wireProtocol)
 	}
@@ -920,24 +561,19 @@ func (svr *Service) RegisterControl(
 
 	// Check auth.
 	authVerifier := svr.auth.Verifier
-	if internal && loginMsg.ClientSpec.AlwaysAuthPass {
-		authVerifier = auth.AlwaysPassVerifier
-	}
 	if err := authVerifier.VerifyLogin(loginMsg); err != nil {
 		return nil, err
 	}
 
 	ctl, err := NewControl(ctx, &SessionContext{
-		RC:             svr.rc,
-		PxyManager:     svr.pxyManager,
-		PluginManager:  svr.pluginManager,
-		AuthVerifier:   authVerifier,
-		EncryptionKey:  svr.auth.EncryptionKey(),
-		Conn:           ctlConn,
-		LoginMsg:       loginMsg,
-		ServerCfg:      svr.cfg,
-		WireProtocol:   wireProtocol,
-		UDPPacketCodec: udpPacketCodec,
+		RC:            svr.rc,
+		PxyManager:    svr.pxyManager,
+		AuthVerifier:  authVerifier,
+		EncryptionKey: svr.auth.EncryptionKey(),
+		Conn:          ctlConn,
+		LoginMsg:      loginMsg,
+		ServerCfg:     svr.cfg,
+		WireProtocol:  wireProtocol,
 	})
 	if err != nil {
 		xl.Warnf("create new controller error: %v", err)
@@ -981,52 +617,10 @@ func (svr *Service) RegisterWorkConn(
 		return fmt.Errorf("work connection wire protocol mismatch: got %s want %s", workWireProtocol, ctl.sessionCtx.WireProtocol)
 	}
 
-	// server plugin hook
-	content := &plugin.NewWorkConnContent{
-		User: plugin.UserInfo{
-			User:  ctl.sessionCtx.LoginMsg.User,
-			Metas: ctl.sessionCtx.LoginMsg.Metas,
-			RunID: ctl.sessionCtx.LoginMsg.RunID,
-		},
-		NewWorkConn: *newMsg,
-	}
-	retContent, err := svr.pluginManager.NewWorkConn(content)
-	if err == nil {
-		newMsg = &retContent.NewWorkConn
-		// Check auth.
-		err = ctl.sessionCtx.AuthVerifier.VerifyNewWorkConn(newMsg)
-	}
-	if err != nil {
+	// Check auth.
+	if err := ctl.sessionCtx.AuthVerifier.VerifyNewWorkConn(newMsg); err != nil {
 		xl.Warnf("invalid NewWorkConn with run id [%s]", newMsg.RunID)
 		return err
 	}
 	return svr.ctlManager.RegisterWorkConn(ctl, proxy.NewWorkConn(workConn))
-}
-
-func (svr *Service) RegisterVisitorConn(visitorConn net.Conn, newMsg *msg.NewVisitorConn, wireProtocol string) error {
-	admit := func(visitorUser, visitorWireProtocol, visitorUDPPacketCodec string) error {
-		if visitorWireProtocol == "" {
-			visitorWireProtocol = wireProtocol
-		}
-		return svr.rc.VisitorManager.NewConn(newMsg.ProxyName, visitorConn, newMsg.Timestamp, newMsg.SignKey,
-			newMsg.UseEncryption, newMsg.UseCompression, visitorUser, visitorWireProtocol, visitorUDPPacketCodec)
-	}
-	// TODO(deprecation): Compatible with old versions, can be without runID, user is empty. In later versions, it will be mandatory to include runID.
-	// If runID is required, it is not compatible with versions prior to v0.50.0.
-	if newMsg.RunID != "" {
-		admitted, err := svr.ctlManager.admitVisitorByRunID(newMsg.RunID, func(visitorUser, controlWireProtocol, controlUDPPacketCodec string) error {
-			if wireProtocol != controlWireProtocol {
-				return fmt.Errorf("visitor connection wire protocol mismatch: got %s want %s", wireProtocol, controlWireProtocol)
-			}
-			return admit(visitorUser, controlWireProtocol, controlUDPPacketCodec)
-		})
-		if err != nil {
-			return err
-		}
-		if !admitted {
-			return fmt.Errorf("no client control found for run id [%s]", newMsg.RunID)
-		}
-		return nil
-	}
-	return admit("", wireProtocol, "")
 }

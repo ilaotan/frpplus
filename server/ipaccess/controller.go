@@ -111,9 +111,6 @@ func New(cfg v1.IPAccessControlConfig) (*Controller, error) {
 func (c *Controller) Types() []string {
 	order := []string{
 		string(v1.ProxyTypeTCP),
-		string(v1.ProxyTypeHTTP),
-		string(v1.ProxyTypeHTTPS),
-		string(v1.ProxyTypeTCPMUX),
 	}
 	types := make([]string, 0, len(c.types))
 	for _, t := range order {

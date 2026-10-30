@@ -29,8 +29,7 @@ type StoreSourceConfig struct {
 }
 
 type storeData struct {
-	Proxies  []v1.TypedProxyConfig   `json:"proxies,omitempty"`
-	Visitors []v1.TypedVisitorConfig `json:"visitors,omitempty"`
+	Proxies []v1.TypedProxyConfig `json:"proxies,omitempty"`
 }
 
 type StoreSource struct {
@@ -44,8 +43,7 @@ var (
 )
 
 const (
-	storeKindProxy   = "proxy"
-	storeKindVisitor = "visitor"
+	storeKindProxy = "proxy"
 )
 
 func NewStoreSource(cfg StoreSourceConfig) (*StoreSource, error) {
@@ -80,8 +78,7 @@ func (s *StoreSource) loadFromFileUnlocked() error {
 	}
 
 	type rawStoreData struct {
-		Proxies  []jsonx.RawMessage `json:"proxies,omitempty"`
-		Visitors []jsonx.RawMessage `json:"visitors,omitempty"`
+		Proxies []jsonx.RawMessage `json:"proxies,omitempty"`
 	}
 	stored := rawStoreData{}
 	if err := jsonx.Unmarshal(data, &stored); err != nil {
@@ -89,7 +86,6 @@ func (s *StoreSource) loadFromFileUnlocked() error {
 	}
 
 	s.proxies = make(map[string]v1.ProxyConfigurer)
-	s.visitors = make(map[string]v1.VisitorConfigurer)
 
 	for i, proxyData := range stored.Proxies {
 		proxyCfg, err := v1.DecodeProxyConfigurerJSON(proxyData, v1.DecodeOptions{
@@ -105,34 +101,16 @@ func (s *StoreSource) loadFromFileUnlocked() error {
 		s.proxies[name] = proxyCfg
 	}
 
-	for i, visitorData := range stored.Visitors {
-		visitorCfg, err := v1.DecodeVisitorConfigurerJSON(visitorData, v1.DecodeOptions{
-			DisallowUnknownFields: false,
-		})
-		if err != nil {
-			return fmt.Errorf("failed to decode visitor at index %d: %w", i, err)
-		}
-		name := visitorCfg.GetBaseConfig().Name
-		if name == "" {
-			return fmt.Errorf("visitor name cannot be empty")
-		}
-		s.visitors[name] = visitorCfg
-	}
-
 	return nil
 }
 
 func (s *StoreSource) saveToFileUnlocked() error {
 	stored := storeData{
-		Proxies:  make([]v1.TypedProxyConfig, 0, len(s.proxies)),
-		Visitors: make([]v1.TypedVisitorConfig, 0, len(s.visitors)),
+		Proxies: make([]v1.TypedProxyConfig, 0, len(s.proxies)),
 	}
 
 	for _, p := range s.proxies {
 		stored.Proxies = append(stored.Proxies, v1.TypedProxyConfig{ProxyConfigurer: p})
-	}
-	for _, v := range s.visitors {
-		stored.Visitors = append(stored.Visitors, v1.TypedVisitorConfig{VisitorConfigurer: v})
 	}
 
 	data, err := jsonx.MarshalIndent(stored, "", "  ")
@@ -185,13 +163,8 @@ func (s *StoreSource) persistOrRollbackUnlocked(rollback func()) error {
 	return nil
 }
 
-// Store map selectors return the target map for generic helpers.
 func proxyStoreEntries(s *StoreSource) map[string]v1.ProxyConfigurer {
 	return s.proxies
-}
-
-func visitorStoreEntries(s *StoreSource) map[string]v1.VisitorConfigurer {
-	return s.visitors
 }
 
 // Store entry helpers share mutation, persistence, and rollback for proxy and visitor maps.
@@ -295,37 +268,6 @@ func (s *StoreSource) GetProxy(name string) v1.ProxyConfigurer {
 	return p
 }
 
-func (s *StoreSource) AddVisitor(visitor v1.VisitorConfigurer) error {
-	name, err := validateVisitorName(visitor)
-	if err != nil {
-		return err
-	}
-	return addStoreEntry(s, visitorStoreEntries, storeKindVisitor, name, visitor)
-}
-
-func (s *StoreSource) UpdateVisitor(visitor v1.VisitorConfigurer) error {
-	name, err := validateVisitorName(visitor)
-	if err != nil {
-		return err
-	}
-	return updateStoreEntry(s, visitorStoreEntries, storeKindVisitor, name, visitor)
-}
-
-func (s *StoreSource) RemoveVisitor(name string) error {
-	return removeStoreEntry(s, visitorStoreEntries, storeKindVisitor, name)
-}
-
-func (s *StoreSource) GetVisitor(name string) v1.VisitorConfigurer {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	v, exists := s.visitors[name]
-	if !exists {
-		return nil
-	}
-	return v
-}
-
 func (s *StoreSource) GetAllProxies() ([]v1.ProxyConfigurer, error) {
 	s.mu.RLock()
 	defer s.mu.RUnlock()
@@ -333,17 +275,6 @@ func (s *StoreSource) GetAllProxies() ([]v1.ProxyConfigurer, error) {
 	result := make([]v1.ProxyConfigurer, 0, len(s.proxies))
 	for _, p := range s.proxies {
 		result = append(result, p)
-	}
-	return result, nil
-}
-
-func (s *StoreSource) GetAllVisitors() ([]v1.VisitorConfigurer, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-
-	result := make([]v1.VisitorConfigurer, 0, len(s.visitors))
-	for _, v := range s.visitors {
-		result = append(result, v)
 	}
 	return result, nil
 }

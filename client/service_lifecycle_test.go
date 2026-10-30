@@ -16,12 +16,11 @@ import (
 	"github.com/fatedier/frp/pkg/msg"
 )
 
-func newLifecycleTestService(t *testing.T, creator func(context.Context, *v1.ClientCommonConfig) Connector) (*Service, string) {
+func newLifecycleTestService(t *testing.T, creator func(context.Context, *v1.ClientCommonConfig) Connector) *Service {
 	t.Helper()
 	svr, err := NewService(ServiceOptions{
 		Common: &v1.ClientCommonConfig{
 			LoginFailExit: new(false),
-			WebServer:     v1.WebServerConfig{Addr: "127.0.0.1", Port: getFreeTCPPort(t)},
 		},
 		ConfigSourceAggregator: source.NewAggregator(source.NewConfigSource()),
 		ConnectorCreator:       creator,
@@ -29,22 +28,7 @@ func newLifecycleTestService(t *testing.T, creator func(context.Context, *v1.Cli
 	require.NoError(t, err)
 	_, err = validation.NewConfigValidator(nil).ValidateClientCommonConfig(svr.common)
 	require.NoError(t, err)
-	address := svr.webServer.Address()
-	assertLifecycleAdminPort(t, address, false)
-	return svr, address
-}
-
-func assertLifecycleAdminPort(t *testing.T, address string, released bool) {
-	t.Helper()
-	ln, err := net.Listen("tcp", address)
-	if ln != nil {
-		_ = ln.Close()
-	}
-	if released {
-		require.NoError(t, err, "admin listener was not released")
-	} else {
-		require.Error(t, err, "admin listener was not bound")
-	}
+	return svr
 }
 
 func waitLifecycleSignal(t *testing.T, done <-chan struct{}) {
@@ -60,7 +44,7 @@ func TestServiceRunAfterEarlyShutdown(t *testing.T) {
 	for _, mode := range []string{"close before Run", "parent already cancelled"} {
 		t.Run(mode, func(t *testing.T) {
 			var attempts atomic.Int64
-			svr, address := newLifecycleTestService(t, func(context.Context, *v1.ClientCommonConfig) Connector {
+			svr := newLifecycleTestService(t, func(context.Context, *v1.ClientCommonConfig) Connector {
 				attempts.Add(1)
 				return &failingConnector{err: net.ErrClosed}
 			})
@@ -72,7 +56,6 @@ func TestServiceRunAfterEarlyShutdown(t *testing.T) {
 			defer cancel()
 			if mode == "close before Run" {
 				svr.Close()
-				assertLifecycleAdminPort(t, address, true)
 			} else {
 				cancel()
 			}
@@ -86,7 +69,6 @@ func TestServiceRunAfterEarlyShutdown(t *testing.T) {
 			require.ErrorIs(t, runErr, context.Canceled)
 			require.Zero(t, attempts.Load(), "closed service attempted login")
 			require.Same(t, resolver, net.DefaultResolver, "closed service changed DNS")
-			assertLifecycleAdminPort(t, address, true)
 		})
 	}
 }
@@ -95,7 +77,7 @@ func TestServiceStartupShutdownLeavesCleanupToRun(t *testing.T) {
 	for _, mode := range []string{"Close", "parent cancellation"} {
 		t.Run(mode, func(t *testing.T) {
 			entered, resume := make(chan struct{}), make(chan struct{})
-			svr, address := newLifecycleTestService(t, func(ctx context.Context, _ *v1.ClientCommonConfig) Connector {
+			svr := newLifecycleTestService(t, func(ctx context.Context, _ *v1.ClientCommonConfig) Connector {
 				close(entered)
 				<-resume
 				return &failingConnector{err: ctx.Err()}
@@ -121,10 +103,8 @@ func TestServiceStartupShutdownLeavesCleanupToRun(t *testing.T) {
 				t.Fatal("Run exited while startup still owned its resources")
 			default:
 			}
-			assertLifecycleAdminPort(t, address, false)
 			resume <- struct{}{}
 			waitLifecycleSignal(t, runDone)
-			assertLifecycleAdminPort(t, address, true)
 			require.ErrorIs(t, svr.ctx.Err(), context.Canceled)
 		})
 	}
@@ -137,7 +117,7 @@ func TestServiceShutdownAfterLogin(t *testing.T) {
 			defer clientConn.Close()
 			defer serverConn.Close()
 			connector := &testConnector{conn: clientConn}
-			svr, address := newLifecycleTestService(t, func(context.Context, *v1.ClientCommonConfig) Connector {
+			svr := newLifecycleTestService(t, func(context.Context, *v1.ClientCommonConfig) Connector {
 				return connector
 			})
 			defer svr.Close()
@@ -180,7 +160,6 @@ func TestServiceShutdownAfterLogin(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("control connection was not released")
 			}
-			assertLifecycleAdminPort(t, address, true)
 		})
 	}
 }

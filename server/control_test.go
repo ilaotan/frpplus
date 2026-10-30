@@ -29,7 +29,6 @@ import (
 	"github.com/fatedier/frp/pkg/auth"
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	"github.com/fatedier/frp/pkg/msg"
-	plugin "github.com/fatedier/frp/pkg/plugin/server"
 	"github.com/fatedier/frp/server/controller"
 	"github.com/fatedier/frp/server/proxy"
 	"github.com/fatedier/frp/server/registry"
@@ -79,11 +78,10 @@ func TestNewControlPoolCountBoundaries(t *testing.T) {
 			cfg.Transport.MaxPoolCount = tc.maxPoolCount
 
 			ctl, err := NewControl(context.Background(), &SessionContext{
-				RC:            &controller.ResourceController{},
-				PxyManager:    proxy.NewManager(),
-				PluginManager: plugin.NewManager(),
-				AuthVerifier:  auth.AlwaysPassVerifier,
-				Conn:          msgConn,
+				RC:           &controller.ResourceController{},
+				PxyManager:   proxy.NewManager(),
+				AuthVerifier: auth.AlwaysPassVerifier,
+				Conn:         msgConn,
 				LoginMsg: &msg.Login{
 					RunID:     "pool-count-run",
 					PoolCount: tc.poolCount,
@@ -390,11 +388,10 @@ func newLifecycleTestControl(
 	conn := newDeadlineReadConn()
 	msgConn := msg.NewConn(conn, msg.NewV1ReadWriter(conn))
 	ctl, err := NewControl(context.Background(), &SessionContext{
-		RC:            &controller.ResourceController{},
-		PxyManager:    proxy.NewManager(),
-		PluginManager: plugin.NewManager(),
-		AuthVerifier:  auth.AlwaysPassVerifier,
-		Conn:          msgConn,
+		RC:           &controller.ResourceController{},
+		PxyManager:   proxy.NewManager(),
+		AuthVerifier: auth.AlwaysPassVerifier,
+		Conn:         msgConn,
 		LoginMsg: &msg.Login{
 			RunID:    runID,
 			ClientID: clientID,

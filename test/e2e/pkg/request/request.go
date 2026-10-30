@@ -8,11 +8,8 @@ import (
 	"io"
 	"net"
 	"net/http"
-	"net/url"
 	"strconv"
 	"time"
-
-	libnet "github.com/fatedier/golib/net"
 
 	httppkg "github.com/fatedier/frp/pkg/util/http"
 	"github.com/fatedier/frp/test/e2e/pkg/rpc"
@@ -35,8 +32,6 @@ type Request struct {
 	tlsConfig *tls.Config
 
 	authValue string
-
-	proxyURL string
 }
 
 func New() *Request {
@@ -72,11 +67,6 @@ func (r *Request) HTTP() *Request {
 
 func (r *Request) HTTPS() *Request {
 	r.protocol = "https"
-	return r
-}
-
-func (r *Request) Proxy(url string) *Request {
-	r.proxyURL = url
 	return r
 }
 
@@ -146,35 +136,21 @@ func (r *Request) Do() (*Response, error) {
 	// for protocol http and https
 	if r.protocol == "http" || r.protocol == "https" {
 		return r.sendHTTPRequest(r.method, fmt.Sprintf("%s://%s%s", r.protocol, addr, r.path),
-			r.host, r.headers, r.proxyURL, r.body, r.tlsConfig)
+			r.host, r.headers, r.body, r.tlsConfig)
 	}
 
 	// for protocol tcp and udp
-	if len(r.proxyURL) > 0 {
-		if r.protocol != "tcp" {
-			return nil, fmt.Errorf("only tcp protocol is allowed for proxy")
-		}
-		proxyType, proxyAddress, auth, err := libnet.ParseProxyURL(r.proxyURL)
-		if err != nil {
-			return nil, fmt.Errorf("parse ProxyURL error: %v", err)
-		}
-		conn, err = libnet.Dial(addr, libnet.WithProxy(proxyType, proxyAddress), libnet.WithProxyAuth(auth))
-		if err != nil {
-			return nil, err
-		}
-	} else {
-		dialer := &net.Dialer{}
-		switch r.protocol {
-		case "tcp":
-			conn, err = dialer.Dial("tcp", addr)
-		case "udp":
-			conn, err = dialer.Dial("udp", addr)
-		default:
-			return nil, fmt.Errorf("invalid protocol")
-		}
-		if err != nil {
-			return nil, err
-		}
+	dialer := &net.Dialer{}
+	switch r.protocol {
+	case "tcp":
+		conn, err = dialer.Dial("tcp", addr)
+	case "udp":
+		conn, err = dialer.Dial("udp", addr)
+	default:
+		return nil, fmt.Errorf("invalid protocol")
+	}
+	if err != nil {
+		return nil, err
 	}
 
 	defer conn.Close()
@@ -195,7 +171,7 @@ type Response struct {
 }
 
 func (r *Request) sendHTTPRequest(method, urlstr string, host string, headers map[string]string,
-	proxy string, body []byte, tlsConfig *tls.Config,
+	body []byte, tlsConfig *tls.Config,
 ) (*Response, error) {
 	var inBody io.Reader
 	if len(body) != 0 {
@@ -225,11 +201,6 @@ func (r *Request) sendHTTPRequest(method, urlstr string, host string, headers ma
 		TLSHandshakeTimeout:   10 * time.Second,
 		ExpectContinueTimeout: 1 * time.Second,
 		TLSClientConfig:       tlsConfig,
-	}
-	if len(proxy) != 0 {
-		tr.Proxy = func(req *http.Request) (*url.URL, error) {
-			return url.Parse(proxy)
-		}
 	}
 	client := http.Client{Transport: tr}
 	resp, err := client.Do(req)

@@ -13,10 +13,8 @@ import (
 	"github.com/fatedier/frp/test/e2e/framework"
 	_ "github.com/fatedier/frp/test/e2e/legacy/basic"
 	_ "github.com/fatedier/frp/test/e2e/legacy/features"
-	_ "github.com/fatedier/frp/test/e2e/legacy/plugin"
 	_ "github.com/fatedier/frp/test/e2e/v1/basic"
 	_ "github.com/fatedier/frp/test/e2e/v1/features"
-	_ "github.com/fatedier/frp/test/e2e/v1/plugin"
 )
 
 // handleFlags sets up all flags and parses the command line.

@@ -19,7 +19,6 @@ import (
 	"fmt"
 	"io"
 	"net/http"
-	"strconv"
 	"strings"
 	"time"
 
@@ -62,7 +61,6 @@ transport.heartbeatTimeout = %d
 webServer.addr = "127.0.0.1"
 webServer.port = %d
 webServer.pprofEnable = true
-enablePrometheus = true
 `, serverPort, tcpMux, heartbeatTimeout, dashboardPort)
 	serverConfigPath := f.WriteTempFile("issue-5391-frps.toml", serverConfig)
 	serverProcess, _, err := f.StartFrps("-c", serverConfigPath)
@@ -144,15 +142,12 @@ remotePort = %d
 
 func waitForReplacementState(dashboardPort, remotePort int, timeout time.Duration) error {
 	return waitForLifecycleCondition(timeout, func() error {
-		metricsBody, err := getLifecycleEndpoint(dashboardPort, "/metrics")
+		proxies, err := framework.GetFrpsProxies(dashboardPort)
 		if err != nil {
 			return err
 		}
-		if err := expectMetricValue(metricsBody, "frp_server_client_counts", "", 1); err != nil {
-			return err
-		}
-		if err := expectMetricValue(metricsBody, "frp_server_proxy_counts", `type="tcp"`, 1); err != nil {
-			return err
+		if len(proxies) != 1 || proxies[0].Name != "issue-5391-tcp" {
+			return fmt.Errorf("expected one online proxy, got %+v", proxies)
 		}
 		clients, err := getOnlineLifecycleClients(dashboardPort)
 		if err != nil {
@@ -186,15 +181,12 @@ func waitForReplacementState(dashboardPort, remotePort int, timeout time.Duratio
 
 func waitForReplacementShutdown(dashboardPort int, timeout time.Duration) error {
 	return waitForLifecycleCondition(timeout, func() error {
-		metricsBody, err := getLifecycleEndpoint(dashboardPort, "/metrics")
+		proxies, err := framework.GetFrpsProxies(dashboardPort)
 		if err != nil {
 			return err
 		}
-		if err := expectMetricValue(metricsBody, "frp_server_client_counts", "", 0); err != nil {
-			return err
-		}
-		if err := expectMetricValue(metricsBody, "frp_server_proxy_counts", `type="tcp"`, 0); err != nil {
-			return err
+		if len(proxies) != 0 {
+			return fmt.Errorf("expected no online proxies, got %+v", proxies)
 		}
 		clients, err := getOnlineLifecycleClients(dashboardPort)
 		if err != nil {
@@ -255,28 +247,6 @@ func getLifecycleEndpoint(port int, path string) (string, error) {
 		return "", err
 	}
 	return string(body), nil
-}
-
-func expectMetricValue(body, name, labels string, want float64) error {
-	prefix := name
-	if labels != "" {
-		prefix += "{" + labels + "}"
-	}
-	for line := range strings.SplitSeq(body, "\n") {
-		fields := strings.Fields(line)
-		if len(fields) != 2 || fields[0] != prefix {
-			continue
-		}
-		got, err := strconv.ParseFloat(fields[1], 64)
-		if err != nil {
-			return err
-		}
-		if got != want {
-			return fmt.Errorf("metric %s = %v, want %v", prefix, got, want)
-		}
-		return nil
-	}
-	return fmt.Errorf("metric %s not found", prefix)
 }
 
 func waitForLifecycleCondition(timeout time.Duration, condition func() error) error {

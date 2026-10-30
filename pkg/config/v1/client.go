@@ -15,8 +15,6 @@
 package v1
 
 import (
-	"os"
-
 	"github.com/samber/lo"
 
 	"github.com/fatedier/frp/pkg/util/util"
@@ -25,8 +23,7 @@ import (
 type ClientConfig struct {
 	ClientCommonConfig
 
-	Proxies  []TypedProxyConfig   `json:"proxies,omitempty"`
-	Visitors []TypedVisitorConfig `json:"visitors,omitempty"`
+	Proxies []TypedProxyConfig `json:"proxies,omitempty"`
 }
 
 type ClientCommonConfig struct {
@@ -46,8 +43,6 @@ type ClientCommonConfig struct {
 	// ServerPort specifies the port to connect to the server on. By default,
 	// this value is 7000.
 	ServerPort int `json:"serverPort,omitempty"`
-	// STUN server to help penetrate NAT hole.
-	NatHoleSTUNServer string `json:"natHoleStunServer,omitempty"`
 	// DNSServer specifies a DNS server address for FRPC to use. If this value
 	// is "", the default DNS will be used.
 	DNSServer string `json:"dnsServer,omitempty"`
@@ -60,19 +55,13 @@ type ClientCommonConfig struct {
 	// set.
 	Start []string `json:"start,omitempty"`
 
-	Log           LogConfig             `json:"log,omitempty"`
-	WebServer     WebServerConfig       `json:"webServer,omitempty"`
-	MetricsServer MetricsServerConfig   `json:"metricsServer,omitempty"`
-	Transport     ClientTransportConfig `json:"transport,omitempty"`
-	VirtualNet    VirtualNetConfig      `json:"virtualNet,omitempty"`
+	Log       LogConfig             `json:"log,omitempty"`
+	Transport ClientTransportConfig `json:"transport,omitempty"`
 
 	// FeatureGates specifies a set of feature gates to enable or disable.
 	// This can be used to enable alpha/beta features or disable default features.
 	FeatureGates map[string]bool `json:"featureGates,omitempty"`
 
-	// UDPPacketSize specifies the udp packet size
-	// By default, this value is 1500
-	UDPPacketSize int64 `json:"udpPacketSize,omitempty"`
 	// Client metadata info
 	Metadatas map[string]string `json:"metadatas,omitempty"`
 
@@ -87,24 +76,18 @@ func (c *ClientCommonConfig) Complete() error {
 	c.ServerAddr = util.EmptyOr(c.ServerAddr, "0.0.0.0")
 	c.ServerPort = util.EmptyOr(c.ServerPort, 7000)
 	c.LoginFailExit = util.EmptyOr(c.LoginFailExit, new(true))
-	c.NatHoleSTUNServer = util.EmptyOr(c.NatHoleSTUNServer, "stun.easyvoip.com:3478")
 
 	if err := c.Auth.Complete(); err != nil {
 		return err
 	}
 	c.Log.Complete()
 	c.Transport.Complete()
-	c.WebServer.Complete()
-	c.MetricsServer.Complete()
-
-	c.UDPPacketSize = util.EmptyOr(c.UDPPacketSize, 1500)
 	return nil
 }
 
 type ClientTransportConfig struct {
 	// Protocol specifies the protocol to use when interacting with the server.
-	// Valid values are "tcp", "kcp", "quic", "websocket" and "wss". By default, this value
-	// is "tcp".
+	// Only "tcp" is supported. By default, this value is "tcp".
 	Protocol string `json:"protocol,omitempty"`
 	// WireProtocol specifies the frpc/frps internal wire protocol version.
 	// Valid values are "v1" and "v2". By default, this value is "v1".
@@ -115,12 +98,8 @@ type ClientTransportConfig struct {
 	// If negative, keep-alive probes are disabled.
 	DialServerKeepAlive int64 `json:"dialServerKeepalive,omitempty"`
 	// ConnectServerLocalIP specifies the address of the client bind when it connect to server.
-	// Note: This value only use in TCP/Websocket protocol. Not support in KCP protocol.
+	// Note: This value only use in TCP protocol.
 	ConnectServerLocalIP string `json:"connectServerLocalIP,omitempty"`
-	// ProxyURL specifies a proxy address to connect to the server through. If
-	// this value is "", the server will be connected to directly. By default,
-	// this value is read from the "http_proxy" environment variable.
-	ProxyURL string `json:"proxyURL,omitempty"`
 	// PoolCount specifies the number of connections the client will make to
 	// the server in advance.
 	PoolCount int `json:"poolCount,omitempty"`
@@ -132,8 +111,6 @@ type ClientTransportConfig struct {
 	// TCPMuxKeepaliveInterval specifies the keep alive interval for TCP stream multiplier.
 	// If TCPMux is true, heartbeat of application layer is unnecessary because it can only rely on heartbeat in TCPMux.
 	TCPMuxKeepaliveInterval int64 `json:"tcpMuxKeepaliveInterval,omitempty"`
-	// QUIC protocol options.
-	QUIC QUICOptions `json:"quic,omitempty"`
 	// HeartBeatInterval specifies at what interval heartbeats are sent to the
 	// server, in seconds. It is not recommended to change this value. By
 	// default, this value is 30. Set negative value to disable it.
@@ -151,7 +128,6 @@ func (c *ClientTransportConfig) Complete() {
 	c.WireProtocol = util.EmptyOr(c.WireProtocol, "v1")
 	c.DialServerTimeout = util.EmptyOr(c.DialServerTimeout, 10)
 	c.DialServerKeepAlive = util.EmptyOr(c.DialServerKeepAlive, 7200)
-	c.ProxyURL = util.EmptyOr(c.ProxyURL, os.Getenv("http_proxy"))
 	c.PoolCount = util.EmptyOr(c.PoolCount, 1)
 	c.TCPMux = util.EmptyOr(c.TCPMux, new(true))
 	c.TCPMuxKeepaliveInterval = util.EmptyOr(c.TCPMuxKeepaliveInterval, 30)
@@ -163,7 +139,6 @@ func (c *ClientTransportConfig) Complete() {
 		c.HeartbeatInterval = util.EmptyOr(c.HeartbeatInterval, 30)
 		c.HeartbeatTimeout = util.EmptyOr(c.HeartbeatTimeout, 90)
 	}
-	c.QUIC.Complete()
 	c.TLS.Complete()
 }
 
@@ -188,9 +163,8 @@ func (c *TLSClientConfig) Complete() {
 
 type AuthClientConfig struct {
 	// Method specifies what authentication method to use to
-	// authenticate frpc with frps. If "token" is specified - token will be
-	// read into login message. If "oidc" is specified - OIDC (Open ID Connect)
-	// token will be issued using OIDC settings. By default, this value is "token".
+	// authenticate frpc with frps. Only "token" is supported. By default, this
+	// value is "token".
 	Method AuthMethod `json:"method,omitempty"`
 	// Specify whether to include auth info in additional scope.
 	// Current supported scopes are: "HeartBeats", "NewWorkConns".
@@ -201,48 +175,10 @@ type AuthClientConfig struct {
 	Token string `json:"token,omitempty"`
 	// TokenSource specifies a dynamic source for the authorization token.
 	// This is mutually exclusive with Token field.
-	TokenSource *ValueSource         `json:"tokenSource,omitempty"`
-	OIDC        AuthOIDCClientConfig `json:"oidc,omitempty"`
+	TokenSource *ValueSource `json:"tokenSource,omitempty"`
 }
 
 func (c *AuthClientConfig) Complete() error {
 	c.Method = util.EmptyOr(c.Method, "token")
 	return nil
-}
-
-type AuthOIDCClientConfig struct {
-	// ClientID specifies the client ID to use to get a token in OIDC authentication.
-	ClientID string `json:"clientID,omitempty"`
-	// ClientSecret specifies the client secret to use to get a token in OIDC
-	// authentication.
-	ClientSecret string `json:"clientSecret,omitempty"`
-	// Audience specifies the audience of the token in OIDC authentication.
-	Audience string `json:"audience,omitempty"`
-	// Scope specifies the scope of the token in OIDC authentication.
-	Scope string `json:"scope,omitempty"`
-	// TokenEndpointURL specifies the URL which implements OIDC Token Endpoint.
-	// It will be used to get an OIDC token.
-	TokenEndpointURL string `json:"tokenEndpointURL,omitempty"`
-	// AdditionalEndpointParams specifies additional parameters to be sent
-	// this field will be transfer to map[string][]string in OIDC token generator.
-	AdditionalEndpointParams map[string]string `json:"additionalEndpointParams,omitempty"`
-
-	// TrustedCaFile specifies the path to a custom CA certificate file
-	// for verifying the OIDC token endpoint's TLS certificate.
-	TrustedCaFile string `json:"trustedCaFile,omitempty"`
-	// InsecureSkipVerify disables TLS certificate verification for the
-	// OIDC token endpoint. Only use this for debugging, not recommended for production.
-	InsecureSkipVerify bool `json:"insecureSkipVerify,omitempty"`
-	// ProxyURL specifies a proxy to use when connecting to the OIDC token endpoint.
-	// Supports http, https, socks5, and socks5h proxy protocols.
-	// If empty, no proxy is used for OIDC connections.
-	ProxyURL string `json:"proxyURL,omitempty"`
-
-	// TokenSource specifies a custom dynamic source for the authorization token.
-	// This is mutually exclusive with every other field of this structure.
-	TokenSource *ValueSource `json:"tokenSource,omitempty"`
-}
-
-type VirtualNetConfig struct {
-	Address string `json:"address,omitempty"`
 }

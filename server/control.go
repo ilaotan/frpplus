@@ -31,7 +31,6 @@ import (
 	v1 "github.com/fatedier/frp/pkg/config/v1"
 	pkgerr "github.com/fatedier/frp/pkg/errors"
 	"github.com/fatedier/frp/pkg/msg"
-	plugin "github.com/fatedier/frp/pkg/plugin/server"
 	"github.com/fatedier/frp/pkg/transport"
 	"github.com/fatedier/frp/pkg/util/util"
 	"github.com/fatedier/frp/pkg/util/wait"
@@ -283,25 +282,6 @@ func (cm *ControlManager) GetByID(runID string) (ctl *Control, ok bool) {
 	return ctl, true
 }
 
-// admitVisitorByRunID commits a visitor admission against the current running
-// control while its run and lifecycle ownership are held. The callback must
-// only perform the in-memory, buffered visitor admission.
-func (cm *ControlManager) admitVisitorByRunID(runID string, admit func(user, wireProtocol, udpPacketCodec string) error) (bool, error) {
-	entry, ok := cm.lockCurrentRun(runID, false)
-	if !ok {
-		return false, nil
-	}
-	defer entry.runMu.Unlock()
-	ctl := entry.ctl
-
-	ctl.lifecycleMu.Lock()
-	defer ctl.lifecycleMu.Unlock()
-	if ctl.state != controlStateRunning {
-		return false, nil
-	}
-	return true, admit(ctl.sessionCtx.LoginMsg.User, ctl.sessionCtx.WireProtocol, ctl.sessionCtx.UDPPacketCodec)
-}
-
 // RegisterWorkConn transfers conn to ctl only if ctl is still the current
 // running generation. On error, ownership remains with the caller.
 func (cm *ControlManager) RegisterWorkConn(ctl *Control, conn *proxy.WorkConn) error {
@@ -358,8 +338,6 @@ type SessionContext struct {
 	RC *controller.ResourceController
 	// proxy manager
 	PxyManager *proxy.Manager
-	// plugin manager
-	PluginManager *plugin.Manager
 	// verifies authentication based on selected method
 	AuthVerifier auth.Verifier
 	// key used for connection encryption
@@ -371,8 +349,7 @@ type SessionContext struct {
 	// server configuration
 	ServerCfg *v1.ServerConfig
 	// negotiated wire protocol for this client session
-	WireProtocol   string
-	UDPPacketCodec string
+	WireProtocol string
 }
 
 type controlState uint8
@@ -656,28 +633,10 @@ func (ctl *Control) WaitClosed() {
 	<-ctl.doneCh
 }
 
-func (ctl *Control) loginUserInfo() plugin.UserInfo {
-	return plugin.UserInfo{
-		User:  ctl.sessionCtx.LoginMsg.User,
-		Metas: ctl.sessionCtx.LoginMsg.Metas,
-		RunID: ctl.runID,
-	}
-}
-
 func (ctl *Control) closeProxy(pxy proxy.Proxy) {
 	pxy.Close()
 	ctl.sessionCtx.PxyManager.Del(pxy.GetName())
 	ctl.serverMetrics.CloseProxy(pxy.GetName(), pxy.GetConfigurer().GetBaseConfig().Type)
-
-	notifyContent := &plugin.CloseProxyContent{
-		User: ctl.loginUserInfo(),
-		CloseProxy: msg.CloseProxy{
-			ProxyName: pxy.GetName(),
-		},
-	}
-	go func() {
-		_ = ctl.sessionCtx.PluginManager.CloseProxy(notifyContent)
-	}()
 }
 
 func (ctl *Control) worker() {
@@ -727,9 +686,6 @@ func (ctl *Control) worker() {
 func (ctl *Control) registerMsgHandlers() {
 	ctl.msgDispatcher.RegisterHandler(&msg.NewProxy{}, ctl.handleNewProxy)
 	ctl.msgDispatcher.RegisterHandler(&msg.Ping{}, ctl.handlePing)
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleVisitor{}, msg.AsyncHandler(ctl.handleNatHoleVisitor))
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleClient{}, msg.AsyncHandler(ctl.handleNatHoleClient))
-	ctl.msgDispatcher.RegisterHandler(&msg.NatHoleReport{}, msg.AsyncHandler(ctl.handleNatHoleReport))
 	ctl.msgDispatcher.RegisterHandler(&msg.CloseProxy{}, ctl.handleCloseProxy)
 }
 
@@ -737,16 +693,8 @@ func (ctl *Control) handleNewProxy(m msg.Message) {
 	xl := ctl.xl
 	inMsg := m.(*msg.NewProxy)
 
-	content := &plugin.NewProxyContent{
-		User:     ctl.loginUserInfo(),
-		NewProxy: *inMsg,
-	}
 	var remoteAddr string
-	retContent, err := ctl.sessionCtx.PluginManager.NewProxy(content)
-	if err == nil {
-		inMsg = &retContent.NewProxy
-		remoteAddr, err = ctl.RegisterProxy(inMsg)
-	}
+	remoteAddr, err := ctl.RegisterProxy(inMsg)
 
 	// register proxy in this control
 	resp := &msg.NewProxyResp{
@@ -772,15 +720,7 @@ func (ctl *Control) handlePing(m msg.Message) {
 	xl := ctl.xl
 	inMsg := m.(*msg.Ping)
 
-	content := &plugin.PingContent{
-		User: ctl.loginUserInfo(),
-		Ping: *inMsg,
-	}
-	retContent, err := ctl.sessionCtx.PluginManager.Ping(content)
-	if err == nil {
-		inMsg = &retContent.Ping
-		err = ctl.sessionCtx.AuthVerifier.VerifyPing(inMsg)
-	}
+	err := ctl.sessionCtx.AuthVerifier.VerifyPing(inMsg)
 	if err != nil {
 		xl.Warnf("received invalid ping: %v", err)
 		_ = ctl.msgDispatcher.Send(&msg.Pong{
@@ -791,21 +731,6 @@ func (ctl *Control) handlePing(m msg.Message) {
 	ctl.lastPing.Store(time.Now())
 	xl.Debugf("receive heartbeat")
 	_ = ctl.msgDispatcher.Send(&msg.Pong{})
-}
-
-func (ctl *Control) handleNatHoleVisitor(m msg.Message) {
-	inMsg := m.(*msg.NatHoleVisitor)
-	ctl.sessionCtx.RC.NatHoleController.HandleVisitor(inMsg, ctl.msgTransporter, ctl.sessionCtx.LoginMsg.User)
-}
-
-func (ctl *Control) handleNatHoleClient(m msg.Message) {
-	inMsg := m.(*msg.NatHoleClient)
-	ctl.sessionCtx.RC.NatHoleController.HandleClient(inMsg, ctl.msgTransporter)
-}
-
-func (ctl *Control) handleNatHoleReport(m msg.Message) {
-	inMsg := m.(*msg.NatHoleReport)
-	ctl.sessionCtx.RC.NatHoleController.HandleReport(inMsg)
 }
 
 func (ctl *Control) handleCloseProxy(m msg.Message) {
@@ -823,17 +748,9 @@ func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err 
 		return
 	}
 
-	// User info
-	userInfo := plugin.UserInfo{
-		User:  ctl.sessionCtx.LoginMsg.User,
-		Metas: ctl.sessionCtx.LoginMsg.Metas,
-		RunID: ctl.runID,
-	}
-
 	// NewProxy will return an interface Proxy.
 	// In fact, it creates different proxies based on the proxy type. We just call run() here.
 	pxy, err := proxy.NewProxy(ctl.ctx, &proxy.Options{
-		UserInfo:           userInfo,
 		LoginMsg:           ctl.sessionCtx.LoginMsg,
 		PoolCount:          ctl.poolCount,
 		ResourceController: ctl.sessionCtx.RC,
@@ -842,7 +759,6 @@ func (ctl *Control) RegisterProxy(pxyMsg *msg.NewProxy) (remoteAddr string, err 
 		ServerCfg:          ctl.sessionCtx.ServerCfg,
 		EncryptionKey:      ctl.sessionCtx.EncryptionKey,
 		WireProtocol:       ctl.sessionCtx.WireProtocol,
-		UDPPacketCodec:     ctl.sessionCtx.UDPPacketCodec,
 	})
 	if err != nil {
 		return remoteAddr, err

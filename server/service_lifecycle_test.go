@@ -57,7 +57,6 @@ func newLifecycleTestService(t *testing.T, web bool) (*Service, *lifecycleListen
 	}
 	if web {
 		cfg.WebServer = v1.WebServerConfig{Addr: "127.0.0.1", Port: freeLifecycleTCPPort(t)}
-		cfg.VhostHTTPPort = freeLifecycleTCPPort(t)
 	}
 	require.NoError(t, cfg.Complete())
 	cfg.BindPort = 0
@@ -70,7 +69,6 @@ func newLifecycleTestService(t *testing.T, web bool) (*Service, *lifecycleListen
 	addresses := []string{l.Addr().String()}
 	if web {
 		addresses = append(addresses, svr.webServer.Address())
-		addresses = append(addresses, net.JoinHostPort(cfg.ProxyBindAddr, fmt.Sprint(cfg.VhostHTTPPort)))
 	}
 	assertLifecyclePorts(t, addresses, false)
 	return svr, l, addresses
@@ -183,12 +181,10 @@ func TestNewServiceReleasesListenersOnWebServerFailure(t *testing.T) {
 			}
 			require.NoError(t, cfg.Complete())
 			dir := t.TempDir()
-			cfg.SSHTunnelGateway.AutoGenPrivateKeyPath = filepath.Join(dir, "ssh_key")
 
 			// Hold reservations together so each listener gets a distinct port.
 			tcpPorts := []*int{
-				&cfg.BindPort, &cfg.TCPMuxHTTPConnectPort, &cfg.SSHTunnelGateway.BindPort,
-				&cfg.VhostHTTPPort, &cfg.VhostHTTPSPort, &cfg.WebServer.Port,
+				&cfg.BindPort, &cfg.WebServer.Port,
 			}
 			tcpReservations := make([]net.Listener, 0, len(tcpPorts))
 			tcpAddresses := make([]string, 0, len(tcpPorts))
@@ -199,17 +195,6 @@ func TestNewServiceReleasesListenersOnWebServerFailure(t *testing.T) {
 				*port = ln.Addr().(*net.TCPAddr).Port
 				tcpReservations = append(tcpReservations, ln)
 				tcpAddresses = append(tcpAddresses, ln.Addr().String())
-			}
-			udpPorts := []*int{&cfg.KCPBindPort, &cfg.QUICBindPort}
-			udpReservations := make([]net.PacketConn, 0, len(udpPorts))
-			udpAddresses := make([]string, 0, len(udpPorts))
-			for _, port := range udpPorts {
-				conn, err := net.ListenPacket("udp", "127.0.0.1:0")
-				require.NoError(t, err)
-				t.Cleanup(func() { _ = conn.Close() })
-				*port = conn.LocalAddr().(*net.UDPAddr).Port
-				udpReservations = append(udpReservations, conn)
-				udpAddresses = append(udpAddresses, conn.LocalAddr().String())
 			}
 
 			webReservation := tcpReservations[len(tcpReservations)-1]
@@ -223,9 +208,6 @@ func TestNewServiceReleasesListenersOnWebServerFailure(t *testing.T) {
 			}
 			for _, ln := range tcpReservations[:len(tcpReservations)-1] {
 				require.NoError(t, ln.Close())
-			}
-			for _, conn := range udpReservations {
-				require.NoError(t, conn.Close())
 			}
 
 			svr, err := NewService(cfg)
@@ -244,11 +226,6 @@ func TestNewServiceReleasesListenersOnWebServerFailure(t *testing.T) {
 				require.ErrorContains(t, err, "failed to find any PEM data in certificate input")
 			}
 			assertLifecyclePorts(t, tcpAddresses, true)
-			for _, address := range udpAddresses {
-				conn, err := net.ListenPacket("udp", address)
-				require.NoError(t, err, "UDP listener %s was not released", address)
-				require.NoError(t, conn.Close())
-			}
 		})
 	}
 }
@@ -272,50 +249,6 @@ func TestServiceRunAfterEarlyShutdown(t *testing.T) {
 			require.Zero(t, listener.accepts.Load(), "closed service started accepting")
 			require.Equal(t, int64(1), listener.closes.Load())
 			assertLifecyclePorts(t, addresses, true)
-		})
-	}
-}
-
-func TestMetricsCollectors(t *testing.T) {
-	for _, tc := range []struct {
-		name                    string
-		webPort, metricsPort    int
-		enablePrometheus        bool
-		wantMem, wantPrometheus bool
-	}{
-		{name: "nothing enabled"},
-		{name: "web server only", webPort: 7500, wantMem: true},
-		{
-			name: "web server with enablePrometheus", webPort: 7500, enablePrometheus: true,
-			wantMem: true, wantPrometheus: true,
-		},
-		{
-			// enablePrometheus alone has no endpoint to serve metrics from, so the
-			// Prometheus collector must stay off, as it did before metricsServer.
-			name: "enablePrometheus without listeners", enablePrometheus: true,
-		},
-		{
-			// The in-memory collector only backs the dashboard API.
-			name: "metrics server only", metricsPort: 7501, wantPrometheus: true,
-		},
-		{
-			name: "both servers", webPort: 7500, metricsPort: 7501,
-			wantMem: true, wantPrometheus: true,
-		},
-		{
-			name: "both servers with enablePrometheus", webPort: 7500, metricsPort: 7501, enablePrometheus: true,
-			wantMem: true, wantPrometheus: true,
-		},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			cfg := &v1.ServerConfig{
-				WebServer:        v1.WebServerConfig{Port: tc.webPort},
-				MetricsServer:    v1.MetricsServerConfig{Port: tc.metricsPort},
-				EnablePrometheus: tc.enablePrometheus,
-			}
-			mem, prometheus := metricsCollectors(cfg)
-			require.Equal(t, tc.wantMem, mem, "EnableMem")
-			require.Equal(t, tc.wantPrometheus, prometheus, "EnablePrometheus")
 		})
 	}
 }

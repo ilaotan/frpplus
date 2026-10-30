@@ -33,11 +33,6 @@ func TestUnmarshalTypedProxyConfig(t *testing.T) {
 				"type": "tcp",
 				"localPort": 22,
 				"remotePort": 6000
-			},
-			{
-				"type": "http",
-				"localPort": 80,
-				"customDomains": ["www.example.com"]
 			}
 		]
 	}`
@@ -45,5 +40,4 @@ func TestUnmarshalTypedProxyConfig(t *testing.T) {
 	require.NoError(err)
 
 	require.IsType(&TCPProxyConfig{}, proxyConfigs.Proxies[0].ProxyConfigurer)
-	require.IsType(&HTTPProxyConfig{}, proxyConfigs.Proxies[1].ProxyConfigurer)
 }
