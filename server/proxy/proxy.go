@@ -280,6 +280,12 @@ func (pxy *BaseProxy) handleUserTCPConnection(userConn net.Conn) {
 		decision := rc.IPAccessController.Check(cfg.Type, pxy.GetName(), userConn.RemoteAddr().String())
 		if !decision.Allowed {
 			xl.Warnf("the user conn [%s] was rejected by ip access control: %s", userConn.RemoteAddr().String(), decision.Reason)
+			// Reset the connection instead of closing it: with the default close
+			// the peer reads a FIN and reports "connection closed by remote
+			// host", while a reset looks like a port with nothing listening.
+			if tcpConn, ok := userConn.(*net.TCPConn); ok {
+				_ = tcpConn.SetLinger(0)
+			}
 			return
 		}
 	}
