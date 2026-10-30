@@ -146,28 +146,28 @@ for platform in $PLATFORMS; do
 		target="arm"
 	fi
 
-	dir="${STAGE}/frp_${VERSION}_${os}_${target}"
+	dir="${STAGE}/frpsplus_${VERSION}_${os}_${target}"
 	mkdir -p "$dir"
 	echo "build ${os}/${arch}..."
 
 	env GOOS="$os" GOARCH="$arch" $arm_env "$GO" build -trimpath -ldflags "$LDFLAGS" \
-		-tags "frps${WEB_TAGS}" -o "$dir/frps${ext}" ./cmd/frps
+		-tags "frps${WEB_TAGS}" -o "$dir/frpsplus${ext}" ./cmd/frps
 	env GOOS="$os" GOARCH="$arch" $arm_env "$GO" build -trimpath -ldflags "$LDFLAGS" \
-		-tags "frpc${WEB_TAGS}" -o "$dir/frpc${ext}" ./cmd/frpc
+		-tags "frpc${WEB_TAGS}" -o "$dir/frpcplus${ext}" ./cmd/frpc
 
 	cp LICENSE "$dir/"
 	cp conf/frps.toml "$dir/frps.example.toml"
 	cp conf/frpc.toml "$dir/frpc.example.toml"
 
 	# pack: prefer zip, fall back to the bsdtar shipped with windows
-	zip_out="bin/frp_${VERSION}_${os}_${target}.zip"
+	zip_out="bin/frpsplus_${VERSION}_${os}_${target}.zip"
 	rm -f "$zip_out"
 	if command -v zip >/dev/null 2>&1; then
-		(cd "$STAGE" && zip -rq "$ROOT/$zip_out" "frp_${VERSION}_${os}_${target}")
+		(cd "$STAGE" && zip -rq "$ROOT/$zip_out" "frpsplus_${VERSION}_${os}_${target}")
 	elif [ -x /c/WINDOWS/system32/tar.exe ]; then
-		(cd "$STAGE" && /c/WINDOWS/system32/tar.exe -a -c -f "$ROOT/$zip_out" "frp_${VERSION}_${os}_${target}")
+		(cd "$STAGE" && /c/WINDOWS/system32/tar.exe -a -c -f "$ROOT/$zip_out" "frpsplus_${VERSION}_${os}_${target}")
 	else
-		tar -a -c -f "$ROOT/$zip_out" -C "$STAGE" "frp_${VERSION}_${os}_${target}"
+		tar -a -c -f "$ROOT/$zip_out" -C "$STAGE" "frpsplus_${VERSION}_${os}_${target}"
 	fi
 	echo "  -> ${zip_out} ($(du -h "$zip_out" | cut -f1))"
 done
@@ -175,10 +175,10 @@ done
 # --- sanity check ------------------------------------------------------------
 case "$(uname -s)" in
 MSYS* | MINGW* | CYGWIN*)
-	if [ -x "${STAGE}/frp_${VERSION}_windows_amd64/frps.exe" ]; then
-		reported="$("${STAGE}/frp_${VERSION}_windows_amd64/frps.exe" -v 2>/dev/null | head -1)"
+	if [ -x "${STAGE}/frpsplus_${VERSION}_windows_amd64/frpsplus.exe" ]; then
+		reported="$("${STAGE}/frpsplus_${VERSION}_windows_amd64/frpsplus.exe" -v 2>/dev/null | head -1)"
 		echo
-		echo "check  : windows/amd64 frps -v -> ${reported}"
+		echo "check  : windows/amd64 frpsplus -v -> ${reported}"
 		[ "$reported" = "$VERSION" ] || {
 			echo "version mismatch, expected ${VERSION}" >&2
 			exit 1
@@ -191,11 +191,11 @@ esac
 echo
 echo "packages in bin/:"
 if command -v sha256sum >/dev/null 2>&1; then
-	for f in bin/frp_"${VERSION}"_*.zip; do
+	for f in bin/frpsplus_"${VERSION}"_*.zip; do
 		echo "  $(sha256sum "$f" | cut -d' ' -f1)  $(basename "$f")"
 	done
 else
-	ls -l bin/frp_"${VERSION}"_*.zip 2>/dev/null || true
+	ls -l bin/frpsplus_"${VERSION}"_*.zip 2>/dev/null || true
 fi
 echo
 echo "next: git tag v${VERSION} && git push origin v${VERSION}"

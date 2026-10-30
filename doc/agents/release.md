@@ -140,3 +140,16 @@ It cross compiles `windows/amd64`, `linux/amd64`, `linux/arm` (GOARM=7) and
 `linux/arm64` with `CGO_ENABLED=0 -trimpath -ldflags "-s -w"`, packs one zip per
 platform into `bin/` (staged trees stay in `release/pack/`), checks the version
 reported by the host binary and prints the sha256 of every package.
+
+The binaries inside a package are named `frpsplus` and `frpcplus` (with `.exe` on
+windows), the archive is `frpsplus_<version>_<os>_<arch>.zip` and the folder
+inside it carries the same name:
+
+```
+frpsplus_0.71.1.plus.2_linux_amd64/
+├── frpsplus
+├── frpcplus
+├── frps.example.toml
+├── frpc.example.toml
+└── LICENSE
+```
