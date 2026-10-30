@@ -232,22 +232,26 @@ http://192.168.1.10:17500/api/v2/ip-access/self-allow?hours=12
 
 - `ip`：**服务端看到的来源地址**，不是你传的（你也没法传）；
 - `ruleId`：落在哪条规则上，重复调用不变；
-- `expiresAt`：unix 秒；`0` 表示永久（只有 `allow-current-ip` 能产生永久规则）。
+- `expiresAt`：unix 秒，等于"这次调用时间 + `hours`"；`0` 表示永久。
 
-连续调用只续期、不新增行：
+每次调用都是**刷新有效期**，不是累加、也不是"只延长"——传进来的比当前短就缩短：
 
 ```bash
-curl -s -u "$AUTH" "$BASE/self-allow?hours=1"     # ruleId 12, expiresAt = now+1h
-curl -s -u "$AUTH" "$BASE/self-allow?hours=24"    # 仍 ruleId 12, expiresAt = now+24h
-curl -s -u "$AUTH" "$BASE/self-allow?hours=1"     # 已有有效期更长，原样返回，不变
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?hours=24"   # now+24h
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?hours=1"    # 同一条规则，改成 now+1h
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?hours=3"    # 同一条规则，改成 now+3h
 ```
+
+所以定时器每跑一次，有效期就往后推到"现在 + hours"；想让它快点过期，调小 `hours` 再调一次即可。
+
+手工加的**永久规则不会被改写**（`expiresAt` 为 `0` 的直接原样返回），避免定时脚本把人工配置降级成临时规则。
 
 ### 7.3 行为约定
 
 - **只加全局 allow 规则**，不支持指定代理；
 - **IP 不由调用方提供**，一律取 TCP 连接的来源地址；
-- **幂等**：同一 IP 反复调用只保留一条规则，`ruleId` 不变；已有有效期更长时不会被缩短，
-  间隔足够时按新的 `hours` 顺延（适合定时器）；
+- **幂等**：同一 IP 反复调用只保留一条规则，`ruleId` 不变，有效期按本次 `hours` 刷新（可长可短）；
+- 已有的永久规则不受影响；
 - 有效期默认取 `selfAllowHours`，可用 `hours` 覆盖，上限 **720 小时（30 天）**；
 - 到期后规则自动失效并被清理。
 

@@ -398,11 +398,11 @@ func (c *Controller) AddRule(proxyName, action, ip, note string) (Rule, error) {
 //
 // The operation is idempotent, because the caller is expected to submit the same
 // address periodically: the whole find-or-create runs under the rule lock, so
-// concurrent calls cannot create two rules, an existing allow rule is extended
-// in place instead of duplicated, and a rule that is already valid long enough
-// is left untouched.
+// concurrent calls cannot create two rules, and an existing allow rule keeps its
+// id while its validity is refreshed to now + hours. A permanent rule is never
+// touched, so a periodic call cannot shorten one that was added by hand.
 //
-// hours 0 keeps the rule permanent. A permanent rule is never shortened.
+// hours 0 keeps the rule permanent.
 func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 	normalizedIP, err := normalizeRuleIP(ip)
 	if err != nil {
@@ -429,8 +429,16 @@ func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 		if err != nil || existing != prefix {
 			continue
 		}
-		// Already permanent, or already valid long enough: nothing to do.
-		if r.ExpiresAt == 0 || (expiresAt != 0 && r.ExpiresAt >= expiresAt) {
+		// A permanent rule, usually added by hand, is left alone: a periodic
+		// self-allow call must not turn it into a temporary one.
+		if r.ExpiresAt == 0 {
+			rule := *r
+			c.ruleMu.Unlock()
+			return rule, nil
+		}
+		// Otherwise the call refreshes the validity to now + hours, even when
+		// that is shorter than what the rule had before.
+		if r.ExpiresAt == expiresAt {
 			rule := *r
 			c.ruleMu.Unlock()
 			return rule, nil
