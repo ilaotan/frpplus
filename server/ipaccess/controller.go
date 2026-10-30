@@ -56,9 +56,12 @@ type Controller struct {
 
 	nextID atomic.Uint64
 
-	stop      chan struct{}
-	closeOnce sync.Once
-	wg        sync.WaitGroup
+	stop   chan struct{}
+	saveCh chan struct{}
+	// pendingSave is set when the in memory state is newer than the file.
+	pendingSave atomic.Bool
+	closeOnce   sync.Once
+	wg          sync.WaitGroup
 }
 
 // New creates a controller and loads the store file. The store is created on
@@ -83,6 +86,7 @@ func New(cfg v1.IPAccessControlConfig) (*Controller, error) {
 		records:    map[string]*Record{},
 		types:      map[string]struct{}{},
 		stop:       make(chan struct{}),
+		saveCh:     make(chan struct{}, 1),
 	}
 	// An empty list is treated as tcp only, the same as the configuration
 	// default.
@@ -96,7 +100,8 @@ func New(cfg v1.IPAccessControlConfig) (*Controller, error) {
 		return nil, err
 	}
 
-	c.wg.Add(1)
+	c.wg.Add(2)
+	go c.saveLoop()
 	go c.cleanupLoop()
 	return c, nil
 }
@@ -221,10 +226,7 @@ func (c *Controller) pruneExpiredRules(now int64) {
 	c.index = buildRuleIndex(c.rules)
 	c.ruleMu.Unlock()
 
-	if err := c.save(); err != nil {
-		log.Warnf("ip access control: %v", err)
-		return
-	}
+	c.markDirty()
 	log.Infof("ip access control: removed %d expired rules", before-len(c.rules))
 }
 
@@ -293,7 +295,8 @@ func (c *Controller) SetGlobalMode(mode string) error {
 	}
 	c.globalMode = m
 	c.ruleMu.Unlock()
-	return c.save()
+	c.markDirty()
+	return nil
 }
 
 // SetProxyMode overrides the global mode for one proxy. An empty mode removes
@@ -308,7 +311,8 @@ func (c *Controller) SetProxyMode(proxyName, mode string) error {
 	if mode == "" {
 		delete(c.proxyModes, proxyName)
 		c.ruleMu.Unlock()
-		return c.save()
+		c.markDirty()
+		return nil
 	}
 	m, err := normalizeMode(mode)
 	if err != nil {
@@ -317,7 +321,8 @@ func (c *Controller) SetProxyMode(proxyName, mode string) error {
 	}
 	c.proxyModes[proxyName] = m
 	c.ruleMu.Unlock()
-	return c.save()
+	c.markDirty()
+	return nil
 }
 
 func (c *Controller) ListRules(proxyName, action string) []Rule {
@@ -384,9 +389,7 @@ func (c *Controller) AddRule(proxyName, action, ip, note string) (Rule, error) {
 	c.index = buildRuleIndex(c.rules)
 	c.ruleMu.Unlock()
 
-	if err := c.save(); err != nil {
-		return Rule{}, err
-	}
+	c.markDirty()
 	return rule, nil
 }
 
@@ -436,11 +439,7 @@ func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 		r.Source = SourceAPI
 		rule := *r
 		c.ruleMu.Unlock()
-		// The store only holds rules, so a full write here is a few hundred
-		// bytes. Keep it synchronous: an allow rule must survive a crash.
-		if err := c.save(); err != nil {
-			return Rule{}, err
-		}
+		c.markDirty()
 		return rule, nil
 	}
 
@@ -457,9 +456,7 @@ func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 	c.index = buildRuleIndex(c.rules)
 	c.ruleMu.Unlock()
 
-	if err := c.save(); err != nil {
-		return Rule{}, err
-	}
+	c.markDirty()
 	return rule, nil
 }
 
@@ -473,7 +470,8 @@ func (c *Controller) DeleteRule(id uint64) error {
 	c.rules = slices.Delete(c.rules, idx, idx+1)
 	c.index = buildRuleIndex(c.rules)
 	c.ruleMu.Unlock()
-	return c.save()
+	c.markDirty()
+	return nil
 }
 
 // ListRecords returns the access records matching the filters, the most recent

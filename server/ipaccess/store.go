@@ -32,6 +32,10 @@ const (
 	// cleanupInterval is how often the expired access records are removed from
 	// the in memory cache.
 	cleanupInterval = 5 * time.Minute
+	// saveDelay coalesces a burst of rule changes into one write. The write
+	// itself is expensive (a flush to disk costs tens of milliseconds on some
+	// systems), so it does not belong on the request path.
+	saveDelay = 500 * time.Millisecond
 )
 
 // load reads the store file. A missing file means an empty store.
@@ -72,12 +76,64 @@ func (c *Controller) load() error {
 	return nil
 }
 
-// save writes the whole store to disk through a temporary file, so that a crash
-// during the write never leaves a truncated store behind.
+// markDirty schedules a write of the store. The in memory state is always the
+// source of truth, the write runs in the background a moment later so that a
+// rule change does not wait for the disk.
+func (c *Controller) markDirty() {
+	c.pendingSave.Store(true)
+	select {
+	case c.saveCh <- struct{}{}:
+	default:
+		// A write is already scheduled, it will pick up this change too.
+	}
+}
+
+// saveLoop writes the store after a short quiet period, and once more on the
+// way out so that a graceful shutdown never loses a pending change.
+func (c *Controller) saveLoop() {
+	defer c.wg.Done()
+
+	timer := time.NewTimer(time.Hour)
+	if !timer.Stop() {
+		<-timer.C
+	}
+	defer timer.Stop()
+
+	for {
+		select {
+		case <-c.stop:
+			// Close flushes whatever is still pending.
+			return
+		case <-c.saveCh:
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			timer.Reset(saveDelay)
+		case <-timer.C:
+			if !c.pendingSave.Load() {
+				continue
+			}
+			if err := c.saveNow(); err != nil {
+				log.Warnf("ip access control: %v", err)
+				timer.Reset(saveDelay)
+			}
+		}
+	}
+}
+
+// saveNow writes the whole store to disk through a temporary file, so that a
+// crash during the write never leaves a truncated store behind.
 //
 // Only rules, modes and the id counter are stored: access records are an
 // observational cache and stay in memory, so the file stays a few KB.
-func (c *Controller) save() error {
+func (c *Controller) saveNow() error {
+	// Claim the work first: a change made while writing sets the flag again and
+	// triggers one more write.
+	c.pendingSave.Store(false)
+
 	data, err := json.Marshal(c.snapshot())
 	if err != nil {
 		return fmt.Errorf("encode ip access store error: %v", err)
@@ -142,12 +198,19 @@ func (c *Controller) cleanupLoop() {
 	}
 }
 
-// Close stops the background workers. Rules are written synchronously on every
-// change, so there is nothing left to flush here.
+// Close stops the background workers and writes the store one last time if a
+// change is still pending, so a graceful shutdown never loses a rule. Only a
+// hard kill can drop the changes of the last saveDelay.
 func (c *Controller) Close() error {
+	var err error
 	c.closeOnce.Do(func() {
 		close(c.stop)
 		c.wg.Wait()
+		if c.pendingSave.Load() {
+			if saveErr := c.saveNow(); saveErr != nil {
+				err = saveErr
+			}
+		}
 	})
-	return nil
+	return err
 }
