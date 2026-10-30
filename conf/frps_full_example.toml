@@ -197,9 +197,10 @@ storePath = "./.frps_ipaccess.json"
 defaultMode = "off"
 # Access records are removed after this many hours without being seen.
 retentionHours = 168
-# Maximum number of access records kept in the store, the least recently seen
-# records are removed first.
-maxRecords = 50000
+# Maximum number of access records cached in memory, the least recently seen
+# records are dropped first. Records are never written to the store, only rules
+# are, and a restart clears them.
+maxRecords = 5000
 # Enable the self-allow api, POST/GET /api/v2/ip-access/self-allow, which adds
 # the client ip of the caller to the global allow list. It is protected by the
 # webServer basic auth, so webServer.user and webServer.password must be set.

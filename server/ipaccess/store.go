@@ -29,11 +29,8 @@ import (
 )
 
 const (
-	// flushInterval is how often the dirty access records are written to disk.
-	// Records only live in memory between two flushes, so a crash may lose the
-	// last minute of them; rules are written synchronously and are never lost.
-	flushInterval = 60 * time.Second
-	// cleanupInterval is how often the expired records are removed.
+	// cleanupInterval is how often the expired access records are removed from
+	// the in memory cache.
 	cleanupInterval = 5 * time.Minute
 )
 
@@ -66,28 +63,21 @@ func (c *Controller) load() error {
 	c.index = buildRuleIndex(c.rules)
 
 	var maxID uint64
-	for i := range s.Records {
-		r := s.Records[i]
-		c.records[recordKey(r.ProxyName, r.IP)] = &r
-		maxID = max(maxID, r.ID)
-	}
 	for _, r := range c.rules {
 		maxID = max(maxID, r.ID)
 	}
 	c.nextID.Store(max(maxID, s.NextID))
 
-	log.Infof("ip access control: loaded %d rules and %d access records from %s",
-		len(c.rules), len(c.records), c.path)
+	log.Infof("ip access control: loaded %d rules from %s", len(c.rules), c.path)
 	return nil
 }
 
 // save writes the whole store to disk through a temporary file, so that a crash
 // during the write never leaves a truncated store behind.
+//
+// Only rules, modes and the id counter are stored: access records are an
+// observational cache and stay in memory, so the file stays a few KB.
 func (c *Controller) save() error {
-	c.recordMu.Lock()
-	c.dirty = false
-	c.recordMu.Unlock()
-
 	data, err := json.Marshal(c.snapshot())
 	if err != nil {
 		return fmt.Errorf("encode ip access store error: %v", err)
@@ -125,54 +115,13 @@ func (c *Controller) save() error {
 
 func (c *Controller) snapshot() *snapshot {
 	c.ruleMu.RLock()
-	s := &snapshot{
+	defer c.ruleMu.RUnlock()
+	return &snapshot{
 		Version:    snapshotVersion,
 		NextID:     c.nextID.Load(),
 		GlobalMode: c.globalMode,
 		ProxyModes: maps.Clone(c.proxyModes),
 		Rules:      slices.Clone(c.rules),
-	}
-	c.ruleMu.RUnlock()
-
-	c.recordMu.Lock()
-	s.Records = make([]Record, 0, len(c.records))
-	for _, r := range c.records {
-		s.Records = append(s.Records, *r)
-	}
-	c.recordMu.Unlock()
-	return s
-}
-
-func (c *Controller) isDirty() bool {
-	c.recordMu.Lock()
-	defer c.recordMu.Unlock()
-	return c.dirty
-}
-
-func (c *Controller) markDirty() {
-	c.recordMu.Lock()
-	c.dirty = true
-	c.recordMu.Unlock()
-}
-
-func (c *Controller) flushLoop() {
-	defer c.wg.Done()
-	ticker := time.NewTicker(flushInterval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-c.stop:
-			return
-		case <-ticker.C:
-			if !c.isDirty() {
-				continue
-			}
-			if err := c.save(); err != nil {
-				log.Warnf("ip access control: %v", err)
-				c.markDirty()
-			}
-		}
 	}
 }
 
@@ -193,15 +142,12 @@ func (c *Controller) cleanupLoop() {
 	}
 }
 
-// Close stops the background workers and flushes the pending records.
+// Close stops the background workers. Rules are written synchronously on every
+// change, so there is nothing left to flush here.
 func (c *Controller) Close() error {
-	var err error
 	c.closeOnce.Do(func() {
 		close(c.stop)
 		c.wg.Wait()
-		if c.isDirty() {
-			err = c.save()
-		}
 	})
-	return err
+	return nil
 }

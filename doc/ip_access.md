@@ -54,7 +54,7 @@ enable = true
 storePath = "/var/lib/frp/ipaccess.json"   # 建议绝对路径
 defaultMode = "allowlist"                  # 先收紧，再按需放行
 retentionHours = 168
-maxRecords = 50000
+maxRecords = 5000
 enableSelfAllow = false
 selfAllowHours = 24
 ```
@@ -91,10 +91,10 @@ selfAllowHours = 24
 | 配置 | 默认 | 说明 |
 |---|---|---|
 | `enable` | `false` | 总开关。关闭时不做判定，也不记录 |
-| `storePath` | `./.frps_ipaccess.json` | 规则与记录的数据文件，建议写绝对路径 |
+| `storePath` | `./.frps_ipaccess.json` | 规则与模式的数据文件（不含访问记录），建议写绝对路径 |
 | `defaultMode` | `off` | 初始全局模式；运行时可改，改动会持久化 |
-| `retentionHours` | `168` | 访问记录保留时长（按最后访问时间） |
-| `maxRecords` | `50000` | 记录条数上限，超出后淘汰最久未见的 |
+| `retentionHours` | `168` | 内存中访问记录的保留时长（按最后访问时间） |
+| `maxRecords` | `5000` | 内存中缓存的记录条数上限，超出后淘汰最久未访问的（不落盘） |
 | `enableSelfAllow` | `false` | 是否开放"自助加白"接口 |
 | `selfAllowHours` | `24` | 自助加白的默认有效期，可被请求参数覆盖 |
 
@@ -176,11 +176,12 @@ IP 变了之后最多一个间隔即可恢复，且不会产生无意义的请�
 
 ## 9. 数据存储与清理
 
-- 单文件存储（`storePath`），写入走"临时文件 + rename"，进程崩溃不会留下半个文件；
-- 记录只在内存里累积，**每 60 秒批量落盘**一次，不会每个连接都写盘；
-  规则（含模式切换）是同步写的，不受这个周期影响，进程被 kill 也不会丢；
+- 单文件存储（`storePath`）**只保存规则、按代理覆盖和全局模式**，写入走"临时文件 + rename"，
+  进程崩溃不会留下半个文件；典型体积是几 KB；
+- **访问记录不落盘**，只存在于内存（默认上限 5000 条），重启即清空；
+- 所有规则变更（增删规则、切模式、自助加白、页面一键放行）都是**同步写盘**，进程被 kill 也不会丢；
 - 每 5 分钟清理一次过期记录与过期规则，也可在页面或调用 `prune` 手动触发；
-- 记录三重淘汰：按 `retentionHours` 过期 → 超过 `maxRecords` 时排序淘汰最久未见的 → 突发大量新 IP 时即时裁剪；
+- 内存记录三重淘汰：按 `retentionHours` 过期 → 超过 `maxRecords` 时淘汰最久未访问的 → 突发大量新 IP 时即时裁剪；
 - 规则和模式修改后重启 frps 依然有效。
 
 ## 10. 本地验证

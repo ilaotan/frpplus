@@ -70,8 +70,8 @@ type Rule struct {
 
 // Record aggregates the accesses of one client IP on one proxy. Records are
 // kept for operators to review traffic in the dashboard and to promote an
-// address into a rule later. They are expired by retention and by the record
-// count limit.
+// address into a rule later. They live in memory only: they are expired by
+// retention and by the record count limit, and a restart clears them.
 type Record struct {
 	ID        uint64 `json:"id"`
 	ProxyName string `json:"proxyName"`
@@ -107,11 +107,12 @@ type Settings struct {
 }
 
 // snapshot is the on-disk representation of the store.
+// snapshot is what gets written to the store file. Access records are not part
+// of it: they are only cached in memory.
 type snapshot struct {
 	Version    int               `json:"version"`
 	NextID     uint64            `json:"nextID"`
 	GlobalMode string            `json:"globalMode"`
 	ProxyModes map[string]string `json:"proxyModes,omitempty"`
 	Rules      []Rule            `json:"rules"`
-	Records    []Record          `json:"records"`
 }

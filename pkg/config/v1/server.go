@@ -247,9 +247,10 @@ type IPAccessControlConfig struct {
 	// RetentionHours specifies how long an access record is kept since it was
 	// last seen. By default, this value is 168 (7 days).
 	RetentionHours int64 `json:"retentionHours,omitempty"`
-	// MaxRecords specifies the maximum number of access records kept in the
-	// store, the least recently seen records are removed first. By default,
-	// this value is 50000.
+	// MaxRecords specifies the maximum number of access records cached in
+	// memory, the least recently seen records are dropped first. Records are
+	// never written to the store, only rules are. By default, this value is
+	// 5000.
 	MaxRecords int64 `json:"maxRecords,omitempty"`
 	// EnableSelfAllow enables the self-allow API, which lets the dashboard
 	// account add its own client IP to the global allow list. It is meant for
@@ -264,6 +265,6 @@ func (c *IPAccessControlConfig) Complete() {
 	c.StorePath = util.EmptyOr(c.StorePath, "./.frps_ipaccess.json")
 	c.DefaultMode = util.EmptyOr(c.DefaultMode, IPAccessModeOff)
 	c.RetentionHours = util.EmptyOr(c.RetentionHours, 7*24)
-	c.MaxRecords = util.EmptyOr(c.MaxRecords, 50000)
+	c.MaxRecords = util.EmptyOr(c.MaxRecords, 5000)
 	c.SelfAllowHours = util.EmptyOr(c.SelfAllowHours, 24)
 }

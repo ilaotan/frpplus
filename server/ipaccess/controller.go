@@ -45,9 +45,10 @@ type Controller struct {
 	rules      []Rule
 	index      ruleIndex
 
+	// records is a memory only cache of what was seen recently, it is never
+	// written to the store: only rules and modes are worth persisting.
 	recordMu sync.Mutex
 	records  map[string]*Record
-	dirty    bool
 
 	nextID atomic.Uint64
 
@@ -83,7 +84,6 @@ func New(cfg v1.IPAccessControlConfig) (*Controller, error) {
 	}
 
 	c.wg.Add(2)
-	go c.flushLoop()
 	go c.cleanupLoop()
 	return c, nil
 }
@@ -161,23 +161,18 @@ func (c *Controller) record(proxyName, ip string, decision Decision) {
 			log.Debugf("ip access control: dropped %d access records over the limit, %d left", removed, len(c.records))
 		}
 	}
-	c.dirty = true
 	c.recordMu.Unlock()
 }
 
 // Prune removes the expired rules and access records, and returns the number of
-// removed records.
+// removed records. Only the rule part touches the store file.
 func (c *Controller) Prune() int {
 	now := time.Now().Unix()
 	c.pruneExpiredRules(now)
 
 	c.recordMu.Lock()
 	defer c.recordMu.Unlock()
-	removed := c.pruneLocked(now)
-	if removed > 0 {
-		c.dirty = true
-	}
-	return removed
+	return c.pruneLocked(now)
 }
 
 // pruneExpiredRules drops the rules added by the self-allow API once they are no
@@ -409,9 +404,11 @@ func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 		r.Source = SourceAPI
 		rule := *r
 		c.ruleMu.Unlock()
-		// A caller may extend its own address every few minutes, do not rewrite
-		// the whole store on every call: the flush loop persists it in a batch.
-		c.markDirty()
+		// The store only holds rules, so a full write here is a few hundred
+		// bytes. Keep it synchronous: an allow rule must survive a crash.
+		if err := c.save(); err != nil {
+			return Rule{}, err
+		}
 		return rule, nil
 	}
 
@@ -428,7 +425,9 @@ func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 	c.index = buildRuleIndex(c.rules)
 	c.ruleMu.Unlock()
 
-	c.markDirty()
+	if err := c.save(); err != nil {
+		return Rule{}, err
+	}
 	return rule, nil
 }
 
@@ -492,9 +491,6 @@ func (c *Controller) DeleteRecords(ids []uint64) int {
 			delete(c.records, key)
 			removed++
 		}
-	}
-	if removed > 0 {
-		c.dirty = true
 	}
 	c.recordMu.Unlock()
 	return removed

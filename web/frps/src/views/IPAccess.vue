@@ -252,8 +252,9 @@
           <div class="section-header">
             <span class="section-title">Access records</span>
             <span class="section-meta">
-              Kept for {{ settings?.retentionHours ?? 0 }}h after the last
-              connection, at most {{ settings?.maxRecords ?? 0 }} records.
+              Memory only, cleared on restart. Kept for
+              {{ settings?.retentionHours ?? 0 }}h after the last connection, at
+              most {{ settings?.maxRecords ?? 0 }} records.
             </span>
           </div>
         </template>
