@@ -131,7 +131,7 @@ curl.exe -s --noproxy "*" -u admin:admin123 http://127.0.0.1:17500/api/v2/ip-acc
 | GET | `/records` | 访问记录，支持 `proxyName` / `ip` / `result=allowed\|denied` / 分页 |
 | POST | `/records/delete` | 按 id 批量删除记录 |
 | POST | `/prune` | 立即清理过期规则与记录 |
-| GET/POST | `/self-allow` | 自助加白，见第 7 节 |
+| GET/POST | `/self-allow` | 自助加白，支持 `ip` / `hours`，见第 7 节 |
 | GET | `/current-ip` | 回显请求方地址与是否回环 |
 | POST | `/allow-current-ip` | 把当前请求方 IP 加进全局 allow，`hours:0` 为永久 |
 
@@ -200,15 +200,21 @@ curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"hour
 ### 7.1 三条命令
 
 ```bash
-# 1) 加白 12 小时（GET，浏览器书签也能用）
+# 1) 加白调用方自己的地址，12 小时
 curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?hours=12"
 
-# 2) POST，hours 放 body
-curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"hours":12}' http://127.0.0.1:17500/api/v2/ip-access/self-allow
+# 2) 指定要加白的地址（不传 ip 才用调用方地址）
+curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?ip=203.0.113.7&hours=12"
 
-# 3) 什么都不带，用配置里的 selfAllowHours
+# 3) POST，参数放 body
+curl -s -u admin:admin123 -X POST -H "Content-Type: application/json" -d '{"ip":"203.0.113.7","hours":12}' http://127.0.0.1:17500/api/v2/ip-access/self-allow
+
+# 4) 什么都不带，用配置里的 selfAllowHours 加白调用方地址
 curl -s -u admin:admin123 -X POST http://127.0.0.1:17500/api/v2/ip-access/self-allow
 ```
+
+`ip` 支持单个地址和 CIDR；`query` 里的参数优先于 body 里的。传了 `ip` 就不再受"回环地址"那条限制——
+在本机直接调也可以。
 
 Windows 终端里 POST 的 JSON 引号要转义：
 
@@ -249,7 +255,7 @@ curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?ho
 ### 7.3 行为约定
 
 - **只加全局 allow 规则**，不支持指定代理；
-- **IP 不由调用方提供**，一律取 TCP 连接的来源地址；
+- **默认加白调用方自己的地址**；传了 `ip` 就按传入的来（`query` > body > 连接地址）；
 - **幂等**：同一 IP 反复调用只保留一条规则，`ruleId` 不变，有效期按本次 `hours` 刷新（可长可短）；
 - 已有的永久规则不受影响；
 - 有效期默认取 `selfAllowHours`，可用 `hours` 覆盖，上限 **720 小时（30 天）**；
@@ -264,7 +270,8 @@ curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?ho
 | 401 | `Unauthorized` | 账号密码错，或忘了 `-u` |
 | 403 | `self allow requires webServer.user and webServer.password to be set` | Dashboard 没设密码。frp 的 Basic Auth 在账号密码都为空时是**全放行**的，所以这里显式拒绝 |
 | 400 | `self allow is not enabled` | 配置里 `enableSelfAllow = false`，改完重启 frps |
-| 400 | `the request comes from 127.0.0.1` | 请求经过了本机反向代理，取到回环地址；直连 frps 再调 |
+| 400 | `the request comes from 127.0.0.1` | 请求经过了本机反向代理，取到回环地址；直连 frps，或者用 `ip=` 显式指定要加白的地址 |
+| 400 | `invalid ip` | `ip` 参数不是合法地址或 CIDR |
 | 400 | `hours must be a positive integer, 720 is the maximum` | `hours` 传了 0、负数或非数字（要永久请用 `allow-current-ip`） |
 | 404 | `page not found` | 二进制太旧，不含这个接口，用新版本重编 |
 
@@ -273,7 +280,7 @@ curl -s -u admin:admin123 "http://127.0.0.1:17500/api/v2/ip-access/self-allow?ho
 | 措施 | 原因 |
 |---|---|
 | 必须配置了 `webServer.user` / `webServer.password`，否则返回 403 | frp 的 Basic Auth 中间件在账号密码都为空时是**全放行**的 |
-| 来源是回环地址时返回 400 | 说明请求经过了本机反向代理，加 `127.0.0.1` 没有意义，直接报错而不是静默加一条无效规则 |
+| 来源是回环地址且没传 `ip` 时返回 400 | 说明请求经过了本机反向代理，加 `127.0.0.1` 没有意义；传了 `ip` 就不受这条限制 |
 | 开关默认关闭 | 升级不会凭空多出一个入口 |
 | `hours` 上限 720 | 避免一次调用把有效期设到天荒地老 |
 

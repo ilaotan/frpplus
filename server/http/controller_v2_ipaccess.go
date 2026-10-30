@@ -238,14 +238,19 @@ func (c *Controller) APIV2IPAccessPrune(ctx *httppkg.Context) (any, error) {
 // selfAllowMaxHours caps the validity a caller may ask for, 30 days.
 const selfAllowMaxHours = 24 * 30
 
+// ipAccessSelfAllowReq is the body of a self allow call. Both fields are
+// optional: without ip the address of the caller is allowed, without hours the
+// configured selfAllowHours applies.
+type ipAccessSelfAllowReq struct {
+	IP    string `json:"ip"`
+	Hours *int64 `json:"hours"`
+}
+
 // /api/v2/ip-access/self-allow
 //
-// Adds the client IP of the caller to the global allow list, so that a client
-// whose public IP keeps changing can let itself in without touching the
-// dashboard. The address is always read from the TCP connection: accepting an
-// ip from the caller would turn this endpoint into an allow-anyone switch.
-//
-// It is protected by the dashboard basic auth middleware.
+// Allows an address in the global allow list. The address is the one of the
+// caller unless the request names one explicitly, which is convenient when the
+// call is made from a host whose own address is not the one that matters.
 func (c *Controller) APIV2IPAccessSelfAllow(ctx *httppkg.Context) (any, error) {
 	ctl, err := c.ipAccessController()
 	if err != nil {
@@ -263,19 +268,17 @@ func (c *Controller) APIV2IPAccessSelfAllow(ctx *httppkg.Context) (any, error) {
 			"self allow requires webServer.user and webServer.password to be set")
 	}
 
-	ip, err := ipaccess.ClientIPFromRemoteAddr(ctx.Req.RemoteAddr)
-	if err != nil {
-		return nil, httppkg.NewError(http.StatusBadRequest, err.Error())
-	}
-	// A loopback address means the request came through a local reverse proxy.
-	// Adding 127.0.0.1 would silently allow something useless, so fail loudly.
-	if ipaccess.IsLoopbackOrUnspecified(ip) {
-		return nil, httppkg.NewError(http.StatusBadRequest, fmt.Sprintf(
-			"the request comes from %s, which is not the address of the caller; "+
-				"call this api directly instead of through a local reverse proxy", ip))
+	// The body can only be read once, so both fields are decoded here.
+	var req ipAccessSelfAllowReq
+	if ctx.Req.Method == http.MethodPost {
+		_ = ctx.BindJSON(&req)
 	}
 
-	hours, err := parseSelfAllowHours(ctx, cfg.SelfAllowHours)
+	ip, err := resolveSelfAllowIP(ctx, req.IP)
+	if err != nil {
+		return nil, err
+	}
+	hours, err := selfAllowHours(ctx, req.Hours, cfg.SelfAllowHours)
 	if err != nil {
 		return nil, err
 	}
@@ -285,7 +288,7 @@ func (c *Controller) APIV2IPAccessSelfAllow(ctx *httppkg.Context) (any, error) {
 		return nil, httppkg.NewError(http.StatusBadRequest, err.Error())
 	}
 	log.Infof("ip access control: self allow for [%s], %d hour(s), expires at [%s]",
-		ip, hours, formatOptionalUnix(rule.ExpiresAt))
+		rule.IP, hours, formatOptionalUnix(rule.ExpiresAt))
 	return model.V2IPAccessSelfAllowResp{
 		IP:        rule.IP,
 		ProxyName: rule.ProxyName,
@@ -293,6 +296,59 @@ func (c *Controller) APIV2IPAccessSelfAllow(ctx *httppkg.Context) (any, error) {
 		RuleID:    rule.ID,
 		ExpiresAt: rule.ExpiresAt,
 	}, nil
+}
+
+// resolveSelfAllowIP returns the address to allow. The query parameter wins over
+// the body, and when neither is present the address of the connection is used.
+//
+// The loopback guard only applies to the last case: it exists because adding
+// 127.0.0.1 after a request came through a local reverse proxy would allow
+// something useless, while an explicit address is a deliberate choice.
+func resolveSelfAllowIP(ctx *httppkg.Context, bodyIP string) (string, error) {
+	raw := strings.TrimSpace(ctx.Query("ip"))
+	if raw == "" {
+		raw = strings.TrimSpace(bodyIP)
+	}
+	if raw != "" {
+		return raw, nil
+	}
+
+	ip, err := ipaccess.ClientIPFromRemoteAddr(ctx.Req.RemoteAddr)
+	if err != nil {
+		return "", httppkg.NewError(http.StatusBadRequest, err.Error())
+	}
+	if ipaccess.IsLoopbackOrUnspecified(ip) {
+		return "", httppkg.NewError(http.StatusBadRequest, fmt.Sprintf(
+			"the request comes from %s, which is not the address of the caller; "+
+				"call this api directly instead of through a local reverse proxy, "+
+				"or pass the address to allow with the ip parameter", ip))
+	}
+	return ip, nil
+}
+
+// selfAllowHours resolves the validity: the query parameter wins, then the body,
+// then the configured default.
+func selfAllowHours(ctx *httppkg.Context, bodyHours *int64, defaultHours int64) (int64, error) {
+	invalid := httppkg.NewError(http.StatusBadRequest, "hours must be a positive integer, 720 is the maximum")
+
+	hours := defaultHours
+	if bodyHours != nil {
+		if *bodyHours <= 0 {
+			return 0, invalid
+		}
+		hours = *bodyHours
+	}
+	if raw := strings.TrimSpace(ctx.Query("hours")); raw != "" {
+		v, err := strconv.ParseInt(raw, 10, 64)
+		if err != nil || v <= 0 {
+			return 0, invalid
+		}
+		hours = v
+	}
+	if hours > selfAllowMaxHours {
+		hours = selfAllowMaxHours
+	}
+	return hours, nil
 }
 
 // /api/v2/ip-access/current-ip
@@ -355,40 +411,6 @@ func (c *Controller) APIV2IPAccessAllowCurrentIP(ctx *httppkg.Context) (any, err
 		RuleID:    rule.ID,
 		ExpiresAt: rule.ExpiresAt,
 	}, nil
-}
-
-// parseSelfAllowHours resolves the validity of a self-allow call. The query
-// parameter wins, a POST may carry it in the body as well, otherwise the
-// configured default applies.
-func parseSelfAllowHours(ctx *httppkg.Context, defaultHours int64) (int64, error) {
-	hours := defaultHours
-	invalid := httppkg.NewError(http.StatusBadRequest, "hours must be a positive integer, 720 is the maximum")
-
-	if ctx.Req.Method == http.MethodPost {
-		// A pointer tells "hours absent" apart from an explicit 0, which is not
-		// accepted here: a permanent rule is only reachable through
-		// allow-current-ip.
-		var req struct {
-			Hours *int64 `json:"hours"`
-		}
-		if err := ctx.BindJSON(&req); err == nil && req.Hours != nil {
-			if *req.Hours <= 0 {
-				return 0, invalid
-			}
-			hours = *req.Hours
-		}
-	}
-	if raw := strings.TrimSpace(ctx.Query("hours")); raw != "" {
-		v, err := strconv.ParseInt(raw, 10, 64)
-		if err != nil || v <= 0 {
-			return 0, invalid
-		}
-		hours = v
-	}
-	if hours > selfAllowMaxHours {
-		hours = selfAllowMaxHours
-	}
-	return hours, nil
 }
 
 func formatOptionalUnix(ts int64) string {
