@@ -445,6 +445,10 @@ func (c *Controller) AllowIP(ip string, hours int64) (Rule, error) {
 		}
 		r.ExpiresAt = expiresAt
 		r.Source = SourceAPI
+		// The index holds a copy of every rule, so it has to be rebuilt when
+		// the validity changes. Without this the matcher keeps using the old
+		// expiry and stops matching the rule once that one has passed.
+		c.index = buildRuleIndex(c.rules)
 		rule := *r
 		c.ruleMu.Unlock()
 		c.markDirty()
