@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/fatedier/golib/crypto"
-	"github.com/fatedier/golib/net/mux"
 	fmux "github.com/fatedier/yamux"
 	"github.com/samber/lo"
 
@@ -63,14 +62,8 @@ func init() {
 
 // Server service
 type Service struct {
-	// Dispatch connections to different handlers listen on same port
-	muxer *mux.Mux
-
 	// Accept connections from client
 	listener net.Listener
-
-	// Accept frp tls connections
-	tlsListener net.Listener
 
 	// Manage all controllers
 	ctlManager *ControlManager
@@ -139,21 +132,8 @@ func NewService(cfg *v1.ServerConfig) (*Service, error) {
 		return nil, fmt.Errorf("create server listener error, %v", err)
 	}
 
-	svr.muxer = mux.NewMux(ln)
-	svr.muxer.SetKeepAlive(time.Duration(cfg.Transport.TCPKeepAlive) * time.Second)
-	go func() {
-		_ = svr.muxer.Serve()
-	}()
-	ln = svr.muxer.DefaultListener()
-
 	svr.listener = ln
 	log.Infof("frps tcp listen on %s", address)
-
-	// frp tls listener
-	svr.tlsListener = svr.muxer.Listen(2, 1, func(data []byte) bool {
-		// tls first byte can be 0x16 only when vhost https port is not same with bind port
-		return int(data[0]) == netpkg.FRPTLSHeadByte || int(data[0]) == 0x16
-	})
 
 	// Create ip access controller for the user connections of tcp proxies.
 	if cfg.IPAccessControl.Enable {
@@ -218,8 +198,6 @@ func (svr *Service) Run(ctx context.Context) {
 		}()
 	}
 
-	go svr.HandleListener(svr.tlsListener, false)
-
 	svr.HandleListener(svr.listener, false)
 
 	<-svr.ctx.Done()
@@ -238,9 +216,6 @@ func (svr *Service) Close() error {
 }
 
 func (svr *Service) closeResources() {
-	if svr.tlsListener != nil {
-		svr.tlsListener.Close()
-	}
 	if svr.listener != nil {
 		svr.listener.Close()
 	}
@@ -253,7 +228,6 @@ func (svr *Service) closeResources() {
 		}
 	}
 	svr.rc.Close()
-	svr.muxer.Close()
 	svr.ctlManager.Close()
 }
 
@@ -481,6 +455,14 @@ func (svr *Service) HandleListener(l net.Listener, internal bool) {
 		// inject xlog object into net.Conn context
 		xl := xlog.New()
 		ctx := context.Background()
+
+		// The keepalive period belongs to the accepted connection, the listener
+		// itself only accepts them.
+		if keepAlive := time.Duration(svr.cfg.Transport.TCPKeepAlive) * time.Second; keepAlive > 0 {
+			if tcpConn, ok := c.(*net.TCPConn); ok {
+				_ = tcpConn.SetKeepAlivePeriod(keepAlive)
+			}
+		}
 
 		c = netpkg.NewContextConn(xlog.NewContext(ctx, xl), c)
 
