@@ -1,0 +1,16 @@
+# frpc 本地验证配置
+# 启动（在 bin 目录）：frpc.exe -c frpc.toml
+# 把本机 127.0.0.1:18080 暴露到 frps 的 18000   python -m http.server 18080
+
+serverAddr = "127.0.0.1"
+serverPort = 17000
+auth.token = "test123"
+
+log.level = "info"
+
+[[proxies]]
+name = "web"
+type = "tcp"
+localIP = "127.0.0.1"
+localPort = 18080
+remotePort = 18000

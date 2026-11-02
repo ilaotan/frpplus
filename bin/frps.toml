@@ -1,0 +1,26 @@
+# frps 本地验证配置
+# 启动（在 bin 目录）：frps.exe -c frps.toml
+
+bindPort = 17000
+auth.token = "test123"
+
+# dashboard / api，监听 0.0.0.0 方便用局域网 IP 或手机访问
+webServer.addr = "0.0.0.0"
+webServer.port = 17500
+webServer.user = "admin"
+webServer.password = "admin123"
+
+log.level = "info"
+
+[ipAccessControl]
+enable = true
+# 绝对路径，从哪个目录启动都落在这里
+storePath = "D:/gitRepository/github/frp/bin/ipaccess.json"
+# 先设成 allowlist：一开始什么都不放行，便于观察"被拦截"
+# 想先看放行，改成 "off"
+defaultMode = "allowlist"
+retentionHours = 24
+maxRecords = 1000
+# 自助加白：复用上面的 webServer 账号，且必须直连 frps
+enableSelfAllow = true
+selfAllowHours = 1
